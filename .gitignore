@@ -94,4 +94,5 @@ dist
 .DS_Store
 Thumbs.db
 
-
+# Firebase key and configs
+config/
