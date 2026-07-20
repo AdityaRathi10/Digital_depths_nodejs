@@ -12,7 +12,7 @@
   >
     <!-- Mobile Header -->
     <header
-      class="md:hidden bg-white shadow-sm flex items-center justify-between p-4 flex-shrink-0 z-20 relative"
+      class="md:hidden bg-white shadow-sm flex items-center justify-between p-4 shrink-0 z-20 relative"
     >
       <div class="flex items-center gap-3">
         <button
@@ -53,7 +53,7 @@
     <!-- Sidebar -->
     <aside
       id="sidebar"
-      class="fixed inset-y-0 left-0 z-40 w-64 bg-gray-50 transform -translate-x-full transition-transform duration-300 md:translate-x-0 md:static md:w-64 border-r border-gray-200 flex flex-col flex-shrink-0"
+      class="fixed inset-y-0 left-0 z-40 w-64 bg-gray-50 transform -translate-x-full transition-transform duration-300 md:translate-x-0 md:static md:w-64 border-r border-gray-200 flex flex-col shrink-0"
     >
       <!-- Sidebar Header -->
       <div class="h-16 flex items-center px-6 gap-3">
@@ -164,7 +164,7 @@
               Orders
             </a>
         </div>
-        <div class="flex flex-grow items-end mt-6">
+        <div class="flex grow items-end mt-6">
             <button
           onclick="logout()"
           class="px-4 py-2 font-medium rounded hover:bg-slate-200 w-full flex items-center gap-2 transition duration-150"
@@ -192,7 +192,7 @@
     <div class="flex-1 flex flex-col min-w-0 bg-gray-50 h-full overflow-y-auto">
       <!-- Desktop Only Header Section Space (matches the image where profile is far right) -->
       <header
-        class="hidden md:flex h-20 items-center justify-end px-8 flex-shrink-0"
+        class="hidden md:flex h-20 items-center justify-end px-8 shrink-0"
       >
         <div class="flex items-center gap-3 cursor-pointer">
           <%- include('./components/_dropdown', { el: `<span class="flex items-center gap-2 py-2"><img class="w-8 h-8 rounded-full border border-gray-300 object-cover" src="https://ui-avatars.com/api/?name=Aditya+Rathi&background=random" alt="User Profile"> Aditya</span>` , align: 'right' , items: [ { header: true,

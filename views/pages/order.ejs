@@ -1,3 +1,20 @@
+<style>
+  /* Basic styling for the log box at the bottom */
+  #log-console {
+      margin-top: 20px;
+      padding: 15px;
+      background: #fff;
+      color: #00ff00;
+      height: 200px;
+      overflow-y: scroll;
+      font-family: monospace;
+      border-radius: 5px;
+  }
+  .log-error { color: #ff4c4c; }
+  .log-success { color: #00d4ff; }
+  .log-info { color: #1e1e1e; }
+</style>
+
 <div
   class="max-w-5xl mx-auto mt-8 bg-white rounded-md shadow-sm border border-gray-200 overflow-hidden"
 >
@@ -144,6 +161,7 @@
       <div class="mt-8 pt-4 flex justify-end">
         <button
           type="submit"
+          id="dispatchBtn"
           class="bg-[#1c3290] hover:bg-[#142468] text-white font-medium py-2.5 px-5 rounded-md shadow flex items-center transition-colors"
         >
           <span class="mr-2">🚀</span> Dispatch Parallel Order Engine
@@ -152,3 +170,60 @@
     </div>
   </form>
 </div>
+
+<!-- Real-time Log Output Area -->
+<div id="log-console"></div>
+
+<!-- Import Socket.io -->
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  const logConsole = document.getElementById('log-console');
+
+  // Listen for logs from the Node.js backend
+  socket.on('log', (data) => {
+      const logEntry = document.createElement('div');
+      logEntry.className = `log-${data.type}`;
+
+      const timestamp = new Date().toLocaleTimeString();
+      logEntry.innerText = `[${timestamp}] ${data.msg}`;
+
+      logConsole.appendChild(logEntry);
+
+      // Auto-scroll to bottom
+      logConsole.scrollTop = logConsole.scrollHeight;
+  });
+
+  console.log("order.ejs script loaded");
+  // Handle Dispatch Button Click
+  document.getElementById('dispatchBtn').addEventListener('click', (e) => {
+    console.log("Dispatch button clicked");
+      e.preventDefault();
+
+      // Gather data from the form
+      const config = {
+          emails: document.getElementById('targetEmails').value,
+          productLink: document.getElementById('productLink').value,
+          maxPrice: document.getElementById('maxPrice').value,
+          maxCheckoutTotal: document.getElementById('maxTotal').value,
+          quantity: document.getElementById('quantity').value,
+          ordersPerAccount: document.getElementById('ordersPerAccount').value,
+          threads: document.getElementById('parallelWorkers').value,
+          paymentMethod: document.getElementById('paymentMethod').value
+      };
+
+      console.log("Config gathered:", config);
+
+      // Basic validation
+      if(!config.emails || !config.productLink) {
+          alert("Emails and Product Link are required.");
+          return;
+      }
+
+      // Clear previous logs
+      logConsole.innerHTML = '';
+
+      // Send to backend via WebSocket
+      socket.emit('start-engine', config);
+  });
+</script>
