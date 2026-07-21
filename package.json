@@ -34,6 +34,7 @@
     "tailwindcss": "^4.3.3"
   },
   "pkg": {
+    "scripts": "node_modules/firebase-admin/**/*.js",
     "assets": [
       "views/**/*",
       "public/**/*",
