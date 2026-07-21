@@ -46,7 +46,7 @@ io.on("connection", (socket) => {
 
     // Launch Browser Once
     const browser = await chromium.launch({
-      headless: false,
+      headless: true,
       args: ["--start-maximized", "--disable-dev-shm-usage", "--no-sandbox"],
     });
 
