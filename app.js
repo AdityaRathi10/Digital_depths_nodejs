@@ -14,7 +14,14 @@ const { runAutomatonWorker } = require("./helpers/runAutomateWroker.js");
 const app = express();
 const port = process.env.PORT || 3000;
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: "*", // Allows connections from your deployed Render URL
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+  transports: ["websocket", "polling"], // Force support for both protocols
+});
 
 // Middleware configurations
 app.use(express.json());
