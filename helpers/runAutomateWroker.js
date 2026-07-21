@@ -1,279 +1,386 @@
-async function runAutomatonWorker(context, email, config, socket, db) {
+async function runAutomatonWorker(browser, email, config, socket, db) {
   const log = (msg, type = "info") =>
     socket.emit("log", { type, msg: `[${email}] ${msg}` });
 
+  const context = await browser.newContext({ viewport: null });
   let page;
+  let docId = null;
+  let keepOpenForUser = false; // NEW FLAG: Tracks if we should leave the tab open
 
   try {
-    log("Step 1: Starting sequence. Fetching credentials from Firestore...");
-
-    log(`Searching 'automations' collection for exact match: ${email}`);
+    log("Step 1: Fetching credentials from Firestore...");
     const snapshot = await db
       .collection("automations")
       .where("email", "==", email)
       .limit(1)
       .get();
 
-    if (snapshot.empty) {
+    if (snapshot.empty || !snapshot.docs[0].data().password) {
       log(
-        "Condition Failed: Account email not found in database. Stopping thread.",
+        "Condition Failed: Email or Password missing in database. Stopping.",
         "error",
       );
       return;
     }
 
-    const accountData = snapshot.docs[0].data();
-    log(`Match found in database. Verifying password existence...`);
-
-    if (!accountData.password) {
-      log(
-        "Condition Failed: Password missing in database for this email. Stopping thread.",
-        "error",
-      );
-      return;
-    }
-
-    const password = accountData.password;
-    log("Credentials verified successfully. Opening new browser tab...");
+    docId = snapshot.docs[0].id;
+    const password = snapshot.docs[0].data().password;
 
     page = await context.newPage();
 
-    // --- HELPER FUNCTION: Human-like delay ---
-    const humanDelay = async (min = 1500, max = 3500) => {
+    const humanDelay = async (min = 2500, max = 5500) => {
       const ms = Math.floor(Math.random() * (max - min + 1)) + min;
-      log(`[Bot-Evasion] Pausing for ${ms}ms to simulate human reading...`);
+      log(`[Bot-Evasion] Reading page... pausing for ${ms}ms.`);
       await page.waitForTimeout(ms);
     };
 
-    log("Navigating to Amazon Sign-In page...");
+    // ==========================================
+    // 1. LOGIN SEQUENCE
+    // ==========================================
+    log("Navigating to Amazon Sign-In...");
     await page.goto(
       "https://www.amazon.in/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.in%2F%3Fref_%3Dnav_ya_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
       { waitUntil: "domcontentloaded" },
     );
-    await humanDelay(1000, 2000);
+    await humanDelay(2000, 4000);
 
-    // ==========================================
-    // LOGIN SEQUENCE
-    // ==========================================
     try {
-      log("Step 2: Locating email input field...");
       const emailLocator = page
         .locator("input[type='email'], input[name='email'], #ap_email")
         .first();
       await emailLocator.waitFor({ state: "visible", timeout: 15000 });
-
-      log(`Typing email address...`);
       await emailLocator.fill(email);
-      await humanDelay(1000, 2000);
-
-      log("Clicking 'Continue' button...");
-      const continueLocator = page
+      await humanDelay(1500, 3000);
+      await page
         .locator("#continue, input.a-button-input, #continue-announce")
-        .first();
-      await continueLocator.click();
+        .first()
+        .click();
     } catch (e) {
-      const errorScreenshot = `public/error-email-${email.split("@")[0]}.png`;
-      await page.screenshot({ path: errorScreenshot });
-      throw new Error(
-        `Email field or Continue button not found. Check screenshot at ${errorScreenshot}`,
-      );
+      throw new Error("Email field or Continue button not found.");
     }
 
-    await humanDelay(1500, 3000);
+    await humanDelay(3000, 5000);
 
     try {
-      log("Locating password input field...");
       const passwordLocator = page
         .locator("input[type='password'], #ap_password, input[name='password']")
         .first();
       await passwordLocator.waitFor({ state: "visible", timeout: 15000 });
-
-      log("Typing password...");
       await passwordLocator.fill(password);
-      await humanDelay(1000, 2000);
-
-      log("Clicking 'Sign-In' submit button...");
-      const submitLocator = page
-        .locator("#signInSubmit, input[type='submit']#signInSubmit")
-        .first();
-
+      await humanDelay(1500, 3000);
       await Promise.all([
         page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-        submitLocator.click(),
+        page
+          .locator("#signInSubmit, input[type='submit']#signInSubmit")
+          .first()
+          .click(),
       ]);
     } catch (e) {
-      const errorScreenshot = `public/error-password-${email.split("@")[0]}.png`;
-      await page.screenshot({ path: errorScreenshot });
-      throw new Error(
-        `Password field or Sign-In button not found. Check screenshot at ${errorScreenshot}`,
-      );
+      throw new Error("Password field or Sign-In button not found.");
     }
 
-    log("Login successful. Proceeding to target product link...");
-    await humanDelay(2000, 4000);
+    // ==========================================
+    // 2. PRODUCT PAGE & BUY NOW
+    // ==========================================
+    log("Login successful. Navigating to product...");
+    await humanDelay(3000, 6000);
     await page.goto(config.productLink, { waitUntil: "domcontentloaded" });
+    await humanDelay(4000, 7000);
 
-    // ==========================================
-    // PRODUCT PAGE & PRICE CHECK
-    // ==========================================
-    log(
-      "Step 3: Checking current page state to confirm we are on the product page...",
-    );
-    await humanDelay(2000, 3000);
-
-    log(
-      `Evaluating product price against user max limit (₹${config.maxPrice})...`,
-    );
     const priceLocator = page.locator(".a-price-whole").first();
-
     if ((await priceLocator.count()) > 0) {
-      let priceText = await priceLocator.innerText();
-      let currentPrice = parseFloat(priceText.replace(/,/g, ""));
-      log(`Found current product price: ₹${currentPrice}`);
-
+      let currentPrice = parseFloat(
+        (await priceLocator.innerText()).replace(/,/g, ""),
+      );
       if (currentPrice > parseFloat(config.maxPrice)) {
         log(
-          `Condition Failed: Current Price (₹${currentPrice}) is strictly greater than Max Limit (₹${config.maxPrice}). Stopping thread.`,
+          `Condition Failed: Price (₹${currentPrice}) exceeds Max Limit (₹${config.maxPrice}).`,
           "error",
         );
-        await page.close();
         return;
       }
-      log(
-        `Price check passed. ₹${currentPrice} is within the acceptable limit.`,
-      );
-    } else {
-      log(
-        "Warning: Could not locate standard price element. Continuing cautiously...",
-        "warn",
-      );
+      log(`Price verified: ₹${currentPrice}`);
     }
 
     if (parseInt(config.quantity) > 1) {
-      log(`Locating quantity dropdown. Target quantity: ${config.quantity}`);
+      log(`Adjusting quantity to ${config.quantity}`);
       const qtyLocator = page.locator("select#quantity");
       if ((await qtyLocator.count()) > 0) {
         await qtyLocator.selectOption(config.quantity.toString());
-        log(
-          `Quantity successfully adjusted to ${config.quantity}. Waiting for page to update...`,
-        );
-        await humanDelay(1500, 2500);
-      } else {
-        log(
-          "Warning: Quantity dropdown not found. Product might be restricted to 1.",
-          "warn",
-        );
+        await humanDelay(2500, 4500);
       }
     }
 
-    log("Locating 'Buy Now' button...");
-    await humanDelay(1000, 2000);
+    log("Clicking 'Buy Now'...");
     await Promise.all([
       page.waitForNavigation({ waitUntil: "domcontentloaded" }),
       page.click("#buy-now-button"),
     ]);
 
     // ==========================================
-    // ANTI-BOT INTERSTITIAL CHECKER
+    // 3. CHECKOUT: ADDRESS SELECTION
     // ==========================================
-    log("Step 4: Evaluating post-click page state...");
-    await humanDelay(2000, 4000);
+    log("Step 3: Checking Address Selection...");
+    await humanDelay(4000, 6000);
 
-    // Look for the "Continue shopping" interruption page you provided in the image
-    const continueShoppingBtn = page
+    const addressButton = page
       .locator(
-        "text='Continue shopping', input[name='submit.continue-shopping'], .a-button-text:has-text('Continue shopping')",
+        'input[data-testid="Address_select"], span:has-text("Deliver to this address") input, input[aria-labelledby="orderSummaryPrimaryActionBtn-announce"]',
       )
       .first();
 
     if (
-      (await continueShoppingBtn.count()) > 0 &&
-      (await continueShoppingBtn.isVisible())
+      (await addressButton.count()) > 0 &&
+      (await addressButton.isVisible())
     ) {
-      log(
-        "ALERT: Amazon 'Continue shopping' bot-check page detected. Attempting to bypass...",
-        "warn",
-      );
-      await humanDelay(2000, 3500);
-
-      log("Clicking 'Continue shopping' to reset state...");
+      log("Clicking 'Deliver to this address'...");
+      await humanDelay(1500, 3000);
       await Promise.all([
         page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-        continueShoppingBtn.click(),
+        addressButton.click(),
       ]);
-
-      log("Bypass clicked. Checking if returned to product page...");
-      await humanDelay(2000, 4000);
-
-      // Attempt to click Buy Now one more time
-      const retryBuyNow = page.locator("#buy-now-button").first();
-      if ((await retryBuyNow.count()) > 0 && (await retryBuyNow.isVisible())) {
-        log("Confirmed return to product page. Retrying 'Buy Now' click...");
-        await humanDelay(1500, 3000);
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-          retryBuyNow.click(),
-        ]);
-        log("Retry submitted. Evaluating new page state...");
-        await humanDelay(2000, 4000);
-      } else {
-        throw new Error(
-          "Failed to find Buy Now button after bypassing the interruption page.",
-        );
-      }
     }
 
     // ==========================================
-    // CHECKOUT & GRAND TOTAL VALIDATION
+    // 4. CHECKOUT: DYNAMIC PAYMENT SELECTION
     // ==========================================
-    log("Step 5: Verifying arrival at final Checkout page...");
+    log(`Step 4: Handling Payment Selection for: ${config.paymentMethod}...`);
+    await humanDelay(3000, 5000);
 
-    log(
-      `Scanning for Grand Total to compare against Max Checkout Total (₹${config.maxCheckoutTotal})...`,
-    );
-    const totalLocator = page
-      .locator(".grand-total-price, #sc-subtotal-amount-buybox")
-      .first();
+    await page.evaluate(() => window.scrollBy(0, 400));
+    await humanDelay(2000, 4000);
 
-    if ((await totalLocator.count()) > 0) {
-      let totalText = await totalLocator.innerText();
-      let grandTotal = parseFloat(totalText.replace(/[^\d.-]/g, ""));
-      log(`Found Grand Total on checkout page: ₹${grandTotal}`);
+    let paymentSelected = false;
 
-      if (grandTotal > parseFloat(config.maxCheckoutTotal)) {
-        log(
-          `Condition Failed: Checkout Grand Total (₹${grandTotal}) exceeds safe limit (₹${config.maxCheckoutTotal}). Stopping thread.`,
-          "error",
-        );
-        await page.close();
-        return;
+    if (config.paymentMethod === "UPI") {
+      const upiRadio = page
+        .locator('input[type="radio"][value*="UPI"]')
+        .first();
+      if ((await upiRadio.count()) > 0) {
+        await upiRadio.click({ force: true });
+        log("Selected UPI. Waiting for input field...");
+        await humanDelay(2500, 4500);
+
+        const upiInput = page
+          .locator('input[name*="addUpiVpa"], input[placeholder*="UPI"]')
+          .first();
+        if ((await upiInput.count()) > 0 && (await upiInput.isVisible())) {
+          log(`Entering UPI ID: ${config.upiId}`);
+          await upiInput.fill(config.upiId);
+          await humanDelay(2000, 4000);
+
+          const verifyBtn = page
+            .locator(
+              'input[name*="ValidateUpiId"], span:has-text("Verify") input, span:has-text("Verify")',
+            )
+            .first();
+          if ((await verifyBtn.count()) > 0) {
+            log("Verifying UPI ID...");
+            await verifyBtn.click();
+            await humanDelay(5000, 7000);
+          }
+        }
+        paymentSelected = true;
       }
-      log(`Grand Total validation passed. Amount is within budget.`);
+    } else if (config.paymentMethod === "NETBANKING") {
+      const nbRadio = page
+        .locator('input[type="radio"][value*="NetBanking"]')
+        .first();
+      if ((await nbRadio.count()) > 0) {
+        await nbRadio.click({ force: true });
+        log(
+          "Selected Net Banking. Waiting for dropdown panel to animate open...",
+        );
+        await humanDelay(3000, 5000);
+
+        const bankDropdown = page
+          .locator('select[name="ppw-bankSelection_dropdown"]')
+          .first();
+
+        if ((await bankDropdown.count()) > 0) {
+          log(`Attempting to select Bank: ${config.bankName}`);
+          try {
+            await bankDropdown.selectOption(
+              { label: config.bankName },
+              { force: true, timeout: 5000 },
+            );
+            log("Bank selected successfully via native dropdown.");
+          } catch (e) {
+            log(
+              "Native dropdown select blocked by Amazon's custom UI. Attempting fallback click...",
+              "warn",
+            );
+
+            const dropdownTrigger = page.locator(".a-dropdown-prompt").first();
+            await dropdownTrigger.click({ force: true });
+            await humanDelay(1500, 3000);
+
+            const bankOption = page
+              .locator(`.a-popover-inner a:has-text("${config.bankName}")`)
+              .first();
+            await bankOption.click({ force: true });
+            log("Bank selected via custom UI fallback.");
+          }
+          await humanDelay(2000, 4000);
+        } else {
+          log(
+            "Warning: Could not locate the Net Banking dropdown element.",
+            "warn",
+          );
+        }
+        paymentSelected = true;
+      }
+    } else if (config.paymentMethod === "COD") {
+      const codRadio = page
+        .locator(
+          'input[type="radio"][value*="COD"], input[type="radio"][value*="Cash"]',
+        )
+        .first();
+      if ((await codRadio.count()) > 0) {
+        await codRadio.click({ force: true });
+        paymentSelected = true;
+      }
+    } else if (config.paymentMethod === "CARD") {
+      const cardRadio = page
+        .locator('input[type="radio"][value*="CreditCard"]')
+        .first();
+      if ((await cardRadio.count()) > 0) {
+        await cardRadio.click({ force: true });
+        paymentSelected = true;
+      }
+    }
+
+    if (paymentSelected) {
+      log("Payment method configured successfully.");
+      await humanDelay(2500, 4500);
+
+      const usePaymentBtn = page
+        .locator(
+          'input[name="ppw-widgetEvent:SetPaymentPlanSelectContinueEvent"], span:has-text("Use this payment method") input',
+        )
+        .first();
+      if (
+        (await usePaymentBtn.count()) > 0 &&
+        (await usePaymentBtn.isVisible())
+      ) {
+        log("Clicking 'Use this payment method'...");
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+          usePaymentBtn.click(),
+        ]);
+      }
     } else {
       log(
-        "Warning: Could not immediately read the Grand Total. The page might still be calculating or structural DOM has changed.",
+        "Warning: Requested payment method not found or currently unavailable.",
         "warn",
       );
     }
 
-    log(`Identifying requested payment method: ${config.paymentMethod}`);
-    log(
-      "Payment selection logic reached (DOM interaction skipped for simulation).",
-    );
+    // ==========================================
+    // 5. FINAL GRAND TOTAL & PLACE ORDER
+    // ==========================================
+    log("Step 5: Verifying final Grand Total...");
+    await humanDelay(4000, 7000);
 
-    log(
-      "All conditions verified successfully. Order is staged and ready for final placement.",
-      "success",
-    );
-    log("Bot workflow complete. Leaving page open for review.", "success");
+    const totalLocator = page
+      .locator(".grand-total-price, #sc-subtotal-amount-buybox, span.payByLine")
+      .first();
+    if ((await totalLocator.count()) > 0) {
+      let grandTotal = parseFloat(
+        (await totalLocator.innerText()).replace(/[^\d.-]/g, ""),
+      );
+      if (grandTotal > parseFloat(config.maxCheckoutTotal)) {
+        log(
+          `Condition Failed: Grand Total (₹${grandTotal}) exceeds limit (₹${config.maxCheckoutTotal}).`,
+          "error",
+        );
+        return;
+      }
+    }
+
+    log("Locating final 'Place Your Order' button...");
+    const placeOrderBtn = page
+      .locator(
+        'input[name="placeYourOrder1"], #placeYourOrder, #submitOrderButtonId',
+      )
+      .first();
+
+    if ((await placeOrderBtn.count()) > 0) {
+      log("Clicking 'Place Your Order'...");
+      await humanDelay(2000, 4000);
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        placeOrderBtn.click(),
+      ]);
+      log("Order sequence submitted!", "success");
+    } else {
+      throw new Error(
+        "Could not locate the 'Place Order' button on the final page.",
+      );
+    }
+
+    // ==========================================
+    // 6. FETCH ORDER ID & DETACH BOT
+    // ==========================================
+    log("Step 6: Fetching Order ID and transferring control...");
+    await humanDelay(5000, 8000);
+
+    log("Navigating to Orders page to confirm ID...");
+    await page.goto("https://www.amazon.in/your-orders/orders", {
+      waitUntil: "domcontentloaded",
+    });
+    await humanDelay(4000, 6000);
+
+    const pageText = await page.innerText("body");
+    const orderIdMatch = pageText.match(/\d{3}-\d{7}-\d{7}/);
+
+    if (orderIdMatch) {
+      const orderId = orderIdMatch[0];
+      log(`Order ID retrieved: ${orderId}`, "success");
+
+      await db.collection("automations").doc(docId).update({
+        order_id: orderId,
+        status: "Success",
+        updated_at: new Date().toISOString(),
+      });
+      log("Firebase database updated successfully.", "success");
+    } else {
+      log(
+        "Warning: Sequence complete, but could not extract Order ID from the page.",
+        "warn",
+      );
+      await db.collection("automations").doc(docId).update({
+        status: "Success (ID Not Extracted)",
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    // Flipping the flag! The sequence is successful, do not close the tab.
+    keepOpenForUser = true;
   } catch (error) {
-    log(
-      `FATAL ERROR: Automation sequence interrupted: ${error.message}`,
-      "error",
-    );
-    if (page) {
-      log("Closing tab due to critical failure.");
-      await page.close();
+    log(`ERROR: Sequence interrupted: ${error.message}`, "error");
+    if (docId) {
+      await db
+        .collection("automations")
+        .doc(docId)
+        .update({
+          status: "Failed",
+          error_message: error.message,
+          updated_at: new Date().toISOString(),
+        })
+        .catch((e) => console.error("DB Error:", e));
+    }
+  } finally {
+    // UPDATED FINALLY BLOCK: Check the flag before closing
+    if (context && !keepOpenForUser) {
+      log("Destroying isolated session due to failure/condition...", "warn");
+      await context.close();
+    } else if (keepOpenForUser) {
+      log(
+        "Automation bot detached. The browser tab will remain open for your manual review.",
+        "success",
+      );
+      // We DO NOT call context.close() here. The user takes over.
     }
   }
 }

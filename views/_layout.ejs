@@ -97,10 +97,10 @@
       <nav class="flex-1 px-4 py-8 space-y-2 overflow-y-auto h-full flex flex-col">
         <a
           href="/"
-          class="flex items-center gap-3 px-4 py-2.5 text-blue-700 bg-white rounded-full shadow-sm font-medium border border-gray-100"
+          class="flex items-center gap-3 px-4 py-2.5 rounded-md font-medium border transition-all text-sm <%= (locals.path === '/' || locals.path === '/dashboard') ? 'text-blue-700 bg-white shadow-sm border-gray-100' : 'text-gray-600 border-transparent hover:bg-white hover:text-blue-700 hover:shadow-sm' %>"
         >
           <svg
-            class="w-5 h-5 text-blue-700"
+            class="w-5 h-5 <%= (locals.path === '/' || locals.path === '/dashboard') ? 'text-blue-700' : '' %>"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -123,13 +123,13 @@
           </p>
         </div>
 
-        <div>
+        <div class="flex flex-col gap-4">
             <a
               href="/email-automation"
-              class="flex items-center gap-3 px-4 py-2 text-gray-600 hover:bg-white hover:text-blue-700 hover:shadow-sm rounded-full font-medium transition-all text-sm"
+              class="flex items-center gap-3 px-4 py-2.5 rounded-md font-medium border transition-all text-sm <%= locals.path === '/email-automation' ? 'text-blue-700 bg-white shadow-sm border-gray-100' : 'text-gray-600 border-transparent hover:bg-white hover:text-blue-700 hover:shadow-sm' %>"
             >
               <svg
-                class="w-5 h-5"
+                class="w-5 h-5 <%= locals.path === '/email-automation' ? 'text-blue-700' : '' %>"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -146,10 +146,10 @@
     
             <a
               href="/orders"
-              class="flex items-center gap-3 px-4 py-2 text-gray-600 hover:bg-white hover:text-blue-700 hover:shadow-sm rounded-full font-medium transition-all text-sm"
+              class="flex items-center gap-3 px-4 py-2.5 rounded-md font-medium border transition-all text-sm <%= locals.path === '/orders' ? 'text-blue-700 bg-white shadow-sm border-gray-100' : 'text-gray-600 border-transparent hover:bg-white hover:text-blue-700 hover:shadow-sm' %>"
             >
               <svg
-                class="w-5 h-5"
+                class="w-5 h-5 <%= locals.path === '/orders' ? 'text-blue-700' : '' %>"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -167,7 +167,7 @@
         <div class="flex grow items-end mt-6">
             <button
           onclick="logout()"
-          class="px-4 py-2 font-medium rounded hover:bg-slate-200 w-full flex items-center gap-2 transition duration-150"
+          class="w-full flex items-center gap-3 px-4 py-2.5 transition-all hover:text-blue-700 hover:bg-white rounded-md hover:shadow-sm font-medium border border-transparent hover:border-gray-100"
         >
           <svg
             class="w-5 h-5"

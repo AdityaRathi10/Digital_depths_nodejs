@@ -24,6 +24,12 @@ app.use(expressLayouts);
 app.set("layout", "_layout");
 app.set("view engine", "ejs");
 
+// Set global variable for EJS to track current route
+app.use((req, res, next) => {
+  res.locals.path = req.path;
+  next();
+});
+
 // Handle WebSocket connections
 io.on("connection", (socket) => {
   console.log("Client connected to dashboard UI.");
@@ -33,35 +39,54 @@ io.on("connection", (socket) => {
       .split("\n")
       .map((e) => e.trim())
       .filter((e) => e);
-
     socket.emit("log", {
       type: "info",
       msg: `Engine started. Loaded ${emails.length} target accounts.`,
     });
 
-    // 2. Playwright Browser Launch
+    // Launch Browser Once
     const browser = await chromium.launch({
       headless: false,
-      args: ["--start-maximized"],
+      args: ["--start-maximized", "--disable-dev-shm-usage", "--no-sandbox"],
     });
 
-    // 3. Playwright uses "Contexts" to manage sessions/viewports
-    const context = await browser.newContext({ viewport: null });
+    // 🛑 UPDATED: Enforce max 10 threads to strictly protect RAM/CPU
+    const requestedThreads = parseInt(config.threads) || 1;
+    const workers = Math.min(requestedThreads, 10);
 
-    const workers = parseInt(config.threads) || 1;
+    socket.emit("log", {
+      type: "info",
+      msg: `Queue initialized. Processing maximum ${workers} accounts per batch.`,
+    });
 
+    // The Batching Loop (Now processes in chunks of 10)
     for (let i = 0; i < emails.length; i += workers) {
       const chunk = emails.slice(i, i + workers);
+
+      socket.emit("log", {
+        type: "info",
+        msg: `--- STARTING BATCH ${Math.floor(i / workers) + 1} (${chunk.length} accounts) ---`,
+      });
+
+      // Run the batch of 10 concurrently
       const promises = chunk.map((email) =>
-        runAutomatonWorker(context, email, config, socket, db),
+        runAutomatonWorker(browser, email, config, socket, db),
       );
+
+      // Wait for all 10 to finish completely before moving on to the next 10
       await Promise.all(promises);
+
+      socket.emit("log", {
+        type: "success",
+        msg: `--- BATCH ${Math.floor(i / workers) + 1} COMPLETED. Freeing up RAM for next batch. ---`,
+      });
     }
 
     socket.emit("log", {
       type: "success",
-      msg: "All automation threads completed.",
+      msg: "All automation batches completed successfully.",
     });
+    // await browser.close(); // Close the main browser engine when all batches are 100% done
   });
 });
 
