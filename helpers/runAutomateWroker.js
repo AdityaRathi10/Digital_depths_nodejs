@@ -5,7 +5,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
   const context = await browser.newContext({ viewport: null });
   let page;
   let docId = null;
-  let keepOpenForUser = false; // NEW FLAG: Tracks if we should leave the tab open
+  let keepOpenForUser = false;
 
   try {
     log("Step 1: Fetching credentials from Firestore...");
@@ -35,7 +35,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     };
 
     // ==========================================
-    // 1. LOGIN SEQUENCE
+    // 1. LOGIN SEQUENCE (WITH OTP INTERCEPT)
     // ==========================================
     log("Navigating to Amazon Sign-In...");
     await page.goto(
@@ -61,22 +61,75 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
     await humanDelay(3000, 5000);
 
-    try {
-      const passwordLocator = page
-        .locator("input[type='password'], #ap_password, input[name='password']")
-        .first();
-      await passwordLocator.waitFor({ state: "visible", timeout: 15000 });
-      await passwordLocator.fill(password);
-      await humanDelay(1500, 3000);
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-        page
-          .locator("#signInSubmit, input[type='submit']#signInSubmit")
-          .first()
-          .click(),
-      ]);
-    } catch (e) {
-      throw new Error("Password field or Sign-In button not found.");
+    const passwordLocator = page
+      .locator("input[type='password'], #ap_password, input[name='password']")
+      .first();
+    await passwordLocator.waitFor({ state: "visible", timeout: 15000 });
+    await passwordLocator.fill(password);
+    await humanDelay(1500, 3000);
+
+    await page
+      .locator("#signInSubmit, input[type='submit']#signInSubmit")
+      .first()
+      .click();
+    log("Submitted password. Waiting for Amazon response...");
+
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await humanDelay(3000, 5000);
+
+    const pwdErrorBox = page
+      .locator(
+        "#auth-error-message-box, .a-alert-content:has-text('Important Notice!'), .a-alert-content:has-text('password is incorrect')",
+      )
+      .first();
+    if ((await pwdErrorBox.count()) > 0 && (await pwdErrorBox.isVisible())) {
+      log(
+        "Condition Failed: Password incorrect or account alert triggered.",
+        "error",
+      );
+      await db.collection("automations").doc(docId).collection(email).add({
+        status: "Failed - Invalid Password",
+        created_at: new Date().toISOString(),
+      });
+      return;
+    }
+
+    const currentUrl = page.url().toLowerCase();
+    const isChallengeUrl =
+      currentUrl.includes("cvf") ||
+      currentUrl.includes("mfa") ||
+      currentUrl.includes("challenge") ||
+      currentUrl.includes("approval");
+    const hasOtpInput =
+      (await page
+        .locator(
+          'input[name="otpCode"], input[name="code"], #cvf-input-code, #auth-mfa-otpcode',
+        )
+        .count()) > 0;
+
+    if (isChallengeUrl || hasOtpInput) {
+      log("⚠️ ACTION REQUIRED: OTP or Security Challenge detected!", "warn");
+      log(
+        "Bot is PAUSED. Please enter the OTP manually in the opened browser window. (5 min timeout)",
+        "warn",
+      );
+
+      try {
+        await page.waitForSelector("#nav-logo, #nav-cart, #nav-belt", {
+          state: "attached",
+          timeout: 300000,
+        });
+        log("Manual verification complete. Resuming automation...", "success");
+        await humanDelay(2000, 4000);
+      } catch (e) {
+        log(
+          "Condition Failed: Manual verification timed out after 5 minutes.",
+          "error",
+        );
+        throw new Error("Failed due to OTP Timeout.");
+      }
+    } else {
+      log("Sign-In successful (No OTP required).", "success");
     }
 
     // ==========================================
@@ -87,27 +140,52 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     await page.goto(config.productLink, { waitUntil: "domcontentloaded" });
     await humanDelay(4000, 7000);
 
-    const priceLocator = page.locator(".a-price-whole").first();
-    if ((await priceLocator.count()) > 0) {
+    const priceBoxLocator = page.locator(".a-price-whole").first();
+    if ((await priceBoxLocator.count()) > 0) {
       let currentPrice = parseFloat(
-        (await priceLocator.innerText()).replace(/,/g, ""),
+        (await priceBoxLocator.innerText()).replace(/,/g, ""),
       );
       if (currentPrice > parseFloat(config.maxPrice)) {
         log(
           `Condition Failed: Price (₹${currentPrice}) exceeds Max Limit (₹${config.maxPrice}).`,
           "error",
         );
+
+        await db.collection("automations").doc(docId).collection(email).add({
+          status: "Failed - Price Exceeded Limit",
+          product_link: config.productLink,
+          price_found: currentPrice,
+          created_at: new Date().toISOString(),
+        });
         return;
       }
       log(`Price verified: ₹${currentPrice}`);
     }
 
     if (parseInt(config.quantity) > 1) {
-      log(`Adjusting quantity to ${config.quantity}`);
-      const qtyLocator = page.locator("select#quantity");
-      if ((await qtyLocator.count()) > 0) {
-        await qtyLocator.selectOption(config.quantity.toString());
-        await humanDelay(2500, 4500);
+      log(`Adjusting quantity to ${config.quantity}...`);
+      const qtyLocator = page
+        .locator(
+          "select#quantity, select[name='quantity'], select.a-native-dropdown",
+        )
+        .first();
+
+      if ((await qtyLocator.count()) > 0 && (await qtyLocator.isVisible())) {
+        try {
+          await qtyLocator.selectOption(config.quantity.toString());
+          log("Quantity successfully updated.");
+          await humanDelay(2500, 4500);
+        } catch (err) {
+          log(
+            `Warning: Found dropdown but failed to select ${config.quantity}. Attempting to proceed anyway.`,
+            "warn",
+          );
+        }
+      } else {
+        log(
+          "Warning: Quantity dropdown not found or not visible. Proceeding with default quantity.",
+          "warn",
+        );
       }
     }
 
@@ -204,13 +282,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
               { label: config.bankName },
               { force: true, timeout: 5000 },
             );
-            log("Bank selected successfully via native dropdown.");
           } catch (e) {
-            log(
-              "Native dropdown select blocked by Amazon's custom UI. Attempting fallback click...",
-              "warn",
-            );
-
             const dropdownTrigger = page.locator(".a-dropdown-prompt").first();
             await dropdownTrigger.click({ force: true });
             await humanDelay(1500, 3000);
@@ -219,14 +291,8 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
               .locator(`.a-popover-inner a:has-text("${config.bankName}")`)
               .first();
             await bankOption.click({ force: true });
-            log("Bank selected via custom UI fallback.");
           }
           await humanDelay(2000, 4000);
-        } else {
-          log(
-            "Warning: Could not locate the Net Banking dropdown element.",
-            "warn",
-          );
         }
         paymentSelected = true;
       }
@@ -263,21 +329,15 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         (await usePaymentBtn.count()) > 0 &&
         (await usePaymentBtn.isVisible())
       ) {
-        log("Clicking 'Use this payment method'...");
         await Promise.all([
           page.waitForNavigation({ waitUntil: "domcontentloaded" }),
           usePaymentBtn.click(),
         ]);
       }
-    } else {
-      log(
-        "Warning: Requested payment method not found or currently unavailable.",
-        "warn",
-      );
     }
 
     // ==========================================
-    // 5. FINAL GRAND TOTAL & PLACE ORDER
+    // 5. FINAL GRAND TOTAL & PLACE ORDER (WITH BANK GATEWAY INTERCEPT)
     // ==========================================
     log("Step 5: Verifying final Grand Total...");
     await humanDelay(4000, 7000);
@@ -294,6 +354,12 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           `Condition Failed: Grand Total (₹${grandTotal}) exceeds limit (₹${config.maxCheckoutTotal}).`,
           "error",
         );
+
+        await db.collection("automations").doc(docId).collection(email).add({
+          status: "Failed - Total Exceeded Limit",
+          checkout_total: grandTotal,
+          created_at: new Date().toISOString(),
+        });
         return;
       }
     }
@@ -312,7 +378,47 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         page.waitForNavigation({ waitUntil: "domcontentloaded" }),
         placeOrderBtn.click(),
       ]);
-      log("Order sequence submitted!", "success");
+
+      // INTERCEPT: Check if we left Amazon for a bank payment gateway
+      const postOrderUrl = page.url().toLowerCase();
+
+      if (
+        config.paymentMethod === "NETBANKING" ||
+        !postOrderUrl.includes("amazon.in")
+      ) {
+        log("⚠️ ACTION REQUIRED: Bank Payment Gateway detected.", "warn");
+        log(
+          "Bot is PAUSED. Please complete the Net Banking payment manually. (10 min timeout)",
+          "warn",
+        );
+
+        try {
+          // Wait for the URL to return to an Amazon success or orders page
+          await page.waitForFunction(
+            () => {
+              const current = window.location.href.toLowerCase();
+              return (
+                current.includes("amazon.in") &&
+                (current.includes("thankyou") ||
+                  current.includes("your-orders") ||
+                  current.includes("order-details"))
+              );
+            },
+            { timeout: 600000 },
+          ); // 600,000ms = 10 minutes
+
+          log("Payment complete. Returned to Amazon.", "success");
+          await humanDelay(3000, 5000);
+        } catch (e) {
+          log(
+            "Condition Failed: Manual payment verification timed out after 10 minutes.",
+            "error",
+          );
+          throw new Error("Failed due to Payment Gateway Timeout.");
+        }
+      } else {
+        log("Order sequence submitted!", "success");
+      }
     } else {
       throw new Error(
         "Could not locate the 'Place Order' button on the final page.",
@@ -320,42 +426,81 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     }
 
     // ==========================================
-    // 6. FETCH ORDER ID & DETACH BOT
+    // 6. FETCH DETAILED ORDER DATA & SUB-COLLECTION DB UPDATE
     // ==========================================
-    log("Step 6: Fetching Order ID and transferring control...");
+    log("Step 6: Fetching Order Details from history...");
     await humanDelay(5000, 8000);
 
-    log("Navigating to Orders page to confirm ID...");
     await page.goto("https://www.amazon.in/your-orders/orders", {
       waitUntil: "domcontentloaded",
     });
     await humanDelay(4000, 6000);
 
-    const pageText = await page.innerText("body");
-    const orderIdMatch = pageText.match(/\d{3}-\d{7}-\d{7}/);
+    const firstOrderCard = page
+      .locator(".order-card, .js-order-card, .yohtmlc-order-card, .a-box-group")
+      .first();
+    let orderBlockText = "";
 
-    if (orderIdMatch) {
-      const orderId = orderIdMatch[0];
-      log(`Order ID retrieved: ${orderId}`, "success");
-
-      await db.collection("automations").doc(docId).update({
-        order_id: orderId,
-        status: "Success",
-        updated_at: new Date().toISOString(),
-      });
-      log("Firebase database updated successfully.", "success");
+    if ((await firstOrderCard.count()) > 0) {
+      orderBlockText = await firstOrderCard.innerText();
     } else {
-      log(
-        "Warning: Sequence complete, but could not extract Order ID from the page.",
-        "warn",
-      );
-      await db.collection("automations").doc(docId).update({
-        status: "Success (ID Not Extracted)",
-        updated_at: new Date().toISOString(),
-      });
+      orderBlockText = await page.innerText("body");
     }
 
-    // Flipping the flag! The sequence is successful, do not close the tab.
+    const orderIdMatch = orderBlockText.match(/\d{3}-\d{7}-\d{7}/);
+    const orderId = orderIdMatch ? orderIdMatch[0] : "Not Found";
+
+    const titleLocator = page
+      .locator(
+        ".yohtmlc-product-title, .a-link-normal.yohtmlc-item-title, .a-link-normal:has(.a-text-bold)",
+      )
+      .first();
+    let productName = "Unknown Product";
+    if ((await titleLocator.count()) > 0) {
+      productName = (await titleLocator.innerText()).trim();
+    }
+
+    const orderTotalLocator = page
+      .locator(".yohtmlc-order-total, .a-color-price, .value")
+      .first();
+    let orderPrice = "Unknown Price";
+    if ((await orderTotalLocator.count()) > 0) {
+      orderPrice = (await orderTotalLocator.innerText()).trim();
+    }
+
+    let orderStatus = "Success";
+    const blockTextLower = orderBlockText.toLowerCase();
+
+    if (
+      blockTextLower.includes("payment failed") ||
+      blockTextLower.includes("attention is required") ||
+      blockTextLower.includes("action required") ||
+      blockTextLower.includes("revise payment") ||
+      blockTextLower.includes("cancelled")
+    ) {
+      orderStatus = "Failed";
+    }
+
+    log(
+      `Order Details Captured -> ID: ${orderId} | Status: ${orderStatus} | Price: ${orderPrice}`,
+    );
+
+    await db.collection("automations").doc(docId).collection(email).add({
+      order_id: orderId,
+      product_name: productName,
+      order_price: orderPrice,
+      status: orderStatus,
+      created_at: new Date().toISOString(),
+    });
+
+    await db.collection("automations").doc(docId).update({
+      last_activity: new Date().toISOString(),
+    });
+
+    log(
+      `Database sub-collection '${email}' successfully updated with order details.`,
+      "success",
+    );
     keepOpenForUser = true;
   } catch (error) {
     log(`ERROR: Sequence interrupted: ${error.message}`, "error");
@@ -363,15 +508,15 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       await db
         .collection("automations")
         .doc(docId)
-        .update({
-          status: "Failed",
+        .collection(email)
+        .add({
+          status: "Failed - Execution Error",
           error_message: error.message,
-          updated_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
         })
         .catch((e) => console.error("DB Error:", e));
     }
   } finally {
-    // UPDATED FINALLY BLOCK: Check the flag before closing
     if (context && !keepOpenForUser) {
       log("Destroying isolated session due to failure/condition...", "warn");
       await context.close();
@@ -380,7 +525,6 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         "Automation bot detached. The browser tab will remain open for your manual review.",
         "success",
       );
-      // We DO NOT call context.close() here. The user takes over.
     }
   }
 }

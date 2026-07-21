@@ -9,7 +9,8 @@
     "dev:server": "nodemon app.js",
     "dev:css": "tailwindcss -i ./public/css/input.css -o ./public/css/style.css --watch",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:css\"",
-    "build:css": "tailwindcss -i ./public/css/input.css -o ./public/css/style.css"
+    "build:css": "tailwindcss -i ./public/css/input.css -o ./public/css/style.css",
+    "build": "pkg . --targets node18-win-x64 --output AmazonBot.exe"
   },
   "author": "Aditya Rathi",
   "license": "ISC",
@@ -28,6 +29,14 @@
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
     "concurrently": "^10.0.3",
+    "pkg": "^5.8.1",
     "tailwindcss": "^4.3.3"
+  },
+  "pkg": {
+    "assets": [
+      "views/**/*",
+      "public/**/*",
+      "config/**/*" 
+    ]
   }
 }

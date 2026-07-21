@@ -4,9 +4,9 @@
       margin-top: 20px;
       padding: 15px;
       background: #fff;
-      color: #00ff00;
+      color: green;
       height: 200px;
-      overflow-y: scroll;
+      overflow-y: auto;
       font-family: monospace;
       border-radius: 5px;
   }
@@ -27,7 +27,7 @@
   </div>
 
   <!-- Form Body -->
-  <form action="/order" method="POST" class="p-6">
+  <form id="order-form" action="/order" method="POST" class="p-6">
     <div class="space-y-6">
       <!-- Row 1 -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -41,8 +41,9 @@
             id="targetEmails"
             name="targetEmails"
             class="w-full border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-            placeholder=""
+            placeholder="Enter targeted emails"
             rows="1"
+            required
           ></textarea>
         </div>
         <div>
@@ -57,6 +58,7 @@
             name="productLink"
             class="w-full border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-gray-300"
             placeholder="https://www.amazon.in/dp/..."
+            required
           />
         </div>
       </div>
@@ -75,6 +77,7 @@
             name="maxPrice"
             class="w-full border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-gray-300"
             placeholder="e.g., 2000"
+            required
           />
         </div>
         <div>
@@ -89,6 +92,7 @@
             name="maxTotal"
             class="w-full border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-gray-300"
             placeholder="e.g., 10000"
+            required
           />
         </div>
       </div>
@@ -107,6 +111,7 @@
             name="quantity"
             value="1"
             class="w-full border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-gray-600"
+            required
           />
         </div>
         <div>
@@ -121,6 +126,7 @@
             name="ordersPerAccount"
             value="1"
             class="w-full border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-gray-600"
+            required
           />
         </div>
         <div>
@@ -135,6 +141,7 @@
             name="parallelWorkers"
             value="1"
             class="w-full border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-gray-600"
+            required
           />
         </div>
       </div>
@@ -255,9 +262,9 @@
       });
   }
 
-  // Handle Dispatch Button Click
-  document.getElementById('dispatchBtn').addEventListener('click', (e) => {
-      console.log("Dispatch button clicked");
+  // Handle Form Submission
+  document.getElementById('order-form').addEventListener('submit', (e) => {
+      console.log("Form submitted");
       e.preventDefault();
 
       // Gather data from the form
@@ -279,8 +286,8 @@
       console.log("Config gathered:", config);
 
       // Basic validation
-      if(!config.emails || !config.productLink) {
-          alert("Emails and Product Link are required.");
+      if(!config.emails || !config.productLink || !config.maxPrice || !config.maxCheckoutTotal) {
+          alert("Emails, Product link, Max Product Price Limit, and Max Checkout Total are required.");
           return;
       }
 

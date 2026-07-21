@@ -94,7 +94,9 @@
       </div>
 
       <!-- Sidebar Navigation -->
-      <nav class="flex-1 px-4 py-8 space-y-2 overflow-y-auto h-full flex flex-col">
+      <nav
+        class="flex-1 px-4 py-8 space-y-2 overflow-y-auto h-full flex flex-col"
+      >
         <a
           href="/"
           class="flex items-center gap-3 px-4 py-2.5 rounded-md font-medium border transition-all text-sm <%= (locals.path === '/' || locals.path === '/dashboard') ? 'text-blue-700 bg-white shadow-sm border-gray-100' : 'text-gray-600 border-transparent hover:bg-white hover:text-blue-700 hover:shadow-sm' %>"
@@ -124,132 +126,122 @@
         </div>
 
         <div class="flex flex-col gap-4">
-            <a
-              href="/email-automation"
-              class="flex items-center gap-3 px-4 py-2.5 rounded-md font-medium border transition-all text-sm <%= locals.path === '/email-automation' ? 'text-blue-700 bg-white shadow-sm border-gray-100' : 'text-gray-600 border-transparent hover:bg-white hover:text-blue-700 hover:shadow-sm' %>"
+          <a
+            href="/email-automation"
+            class="flex items-center gap-3 px-4 py-2.5 rounded-md font-medium border transition-all text-sm <%= locals.path === '/email-automation' ? 'text-blue-700 bg-white shadow-sm border-gray-100' : 'text-gray-600 border-transparent hover:bg-white hover:text-blue-700 hover:shadow-sm' %>"
+          >
+            <svg
+              class="w-5 h-5 <%= locals.path === '/email-automation' ? 'text-blue-700' : '' %>"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <svg
-                class="w-5 h-5 <%= locals.path === '/email-automation' ? 'text-blue-700' : '' %>"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                ></path>
-              </svg>
-              Email Automation
-            </a>
-    
-            <a
-              href="/orders"
-              class="flex items-center gap-3 px-4 py-2.5 rounded-md font-medium border transition-all text-sm <%= locals.path === '/orders' ? 'text-blue-700 bg-white shadow-sm border-gray-100' : 'text-gray-600 border-transparent hover:bg-white hover:text-blue-700 hover:shadow-sm' %>"
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+              ></path>
+            </svg>
+            Email Automation
+          </a>
+
+          <a
+            href="/orders"
+            class="flex items-center gap-3 px-4 py-2.5 rounded-md font-medium border transition-all text-sm <%= locals.path === '/orders' ? 'text-blue-700 bg-white shadow-sm border-gray-100' : 'text-gray-600 border-transparent hover:bg-white hover:text-blue-700 hover:shadow-sm' %>"
+          >
+            <svg
+              class="w-5 h-5 <%= locals.path === '/orders' ? 'text-blue-700' : '' %>"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
             >
-              <svg
-                class="w-5 h-5 <%= locals.path === '/orders' ? 'text-blue-700' : '' %>"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
-                ></path>
-              </svg>
-              Orders
-            </a>
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+              ></path>
+            </svg>
+            Orders
+          </a>
         </div>
         <div class="flex grow items-end mt-6">
-            <button
-          onclick="logout()"
-          class="w-full flex items-center gap-3 px-4 py-2.5 transition-all hover:text-blue-700 hover:bg-white rounded-md hover:shadow-sm font-medium border border-transparent hover:border-gray-100"
-        >
-          <svg
-            class="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+          <button
+            onclick="logout()"
+            class="w-full flex items-center gap-3 px-4 py-2.5 transition-all hover:text-blue-700 hover:bg-white rounded-md hover:shadow-sm font-medium border border-transparent hover:border-gray-100"
           >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-            ></path>
-          </svg>
-          Logout
-        </button>
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+              ></path>
+            </svg>
+            Logout
+          </button>
         </div>
       </nav>
     </aside>
 
     <!-- Main Content Area -->
     <div class="flex-1 flex flex-col min-w-0 bg-gray-50 h-full overflow-y-auto">
-      <!-- Desktop Only Header Section Space (matches the image where profile is far right) -->
-      <header
-        class="hidden md:flex h-20 items-center justify-end px-8 shrink-0"
-      >
-        <div class="flex items-center gap-3 cursor-pointer">
-          <%- include('./components/_dropdown', { el: `<span class="flex items-center gap-2 py-2"><img class="w-8 h-8 rounded-full border border-gray-300 object-cover" src="https://ui-avatars.com/api/?name=Aditya+Rathi&background=random" alt="User Profile"> Aditya</span>` , align: 'right' , items: [ { header: true,
-                label: 'My Account' }, { divider: true }, { label: 'Profile' }, { label: 'Settings' } ] }) %>
-        </div>
-      </header>
-
       <main class="flex-1 p-4 md:px-12 md:py-4"><%- body %></main>
     </div>
 
     <script>
-      const mobileMenuBtn = document.getElementById('mobile-menu-btn');
-      const closeSidebarBtn = document.getElementById('close-sidebar-btn');
-      const sidebar = document.getElementById('sidebar');
-      const sidebarOverlay = document.getElementById('sidebar-overlay');
+        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+        const closeSidebarBtn = document.getElementById('close-sidebar-btn');
+        const sidebar = document.getElementById('sidebar');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
 
-      function toggleSidebar() {
-          const isOpen = !sidebar.classList.contains('-translate-x-full');
-          if (isOpen) {
-              sidebar.classList.add('-translate-x-full');
-              sidebarOverlay.classList.add('hidden');
-              document.body.classList.remove('overflow-hidden');
-          } else {
-              sidebar.classList.remove('-translate-x-full');
-              sidebarOverlay.classList.remove('hidden');
-              document.body.classList.add('overflow-hidden');
+        function toggleSidebar() {
+            const isOpen = !sidebar.classList.contains('-translate-x-full');
+            if (isOpen) {
+                sidebar.classList.add('-translate-x-full');
+                sidebarOverlay.classList.add('hidden');
+                document.body.classList.remove('overflow-hidden');
+            } else {
+                sidebar.classList.remove('-translate-x-full');
+                sidebarOverlay.classList.remove('hidden');
+                document.body.classList.add('overflow-hidden');
+            }
+        }
+
+        if(mobileMenuBtn) mobileMenuBtn.addEventListener('click', toggleSidebar);
+        if(closeSidebarBtn) closeSidebarBtn.addEventListener('click', toggleSidebar);
+        if(sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
+
+
+        async function logout() {
+          try {
+              // Call the server to clear the httpOnly session cookie
+              const response = await fetch('/sessionLogout', {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/json'
+                  }
+              });
+
+              if (response.ok) {
+                  // Clear any local Firebase auth state if it exists, then redirect
+                  window.location.href = '/login';
+              } else {
+                  console.error("Failed to log out properly.");
+                  // Fallback redirect just in case
+                  window.location.href = '/login';
+              }
+          } catch (error) {
+              console.error("Logout error:", error);
+              window.location.href = '/login';
           }
       }
-
-      if(mobileMenuBtn) mobileMenuBtn.addEventListener('click', toggleSidebar);
-      if(closeSidebarBtn) closeSidebarBtn.addEventListener('click', toggleSidebar);
-      if(sidebarOverlay) sidebarOverlay.addEventListener('click', toggleSidebar);
-
-
-      async function logout() {
-        try {
-            // Call the server to clear the httpOnly session cookie
-            const response = await fetch('/sessionLogout', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            if (response.ok) {
-                // Clear any local Firebase auth state if it exists, then redirect
-                window.location.href = '/login';
-            } else {
-                console.error("Failed to log out properly.");
-                // Fallback redirect just in case
-                window.location.href = '/login';
-            }
-        } catch (error) {
-            console.error("Logout error:", error);
-            window.location.href = '/login';
-        }
-    }
     </script>
   </body>
 </html>
