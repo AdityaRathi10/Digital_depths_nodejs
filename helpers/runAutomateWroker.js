@@ -81,7 +81,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       .click();
     log("Submitted password. Waiting for Amazon response...");
 
-    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForLoadState("domcontentloaded").catch(() => { });
     await humanDelay(3000, 5000);
 
     const pwdErrorBox = page
@@ -172,7 +172,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
             price_found: currentPrice,
             created_at: new Date().toISOString(),
           });
-        } catch (e) {}
+        } catch (e) { }
         return;
       }
       log(`Price verified: ₹${currentPrice}`);
@@ -207,7 +207,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
     log("Clicking 'Buy Now'...");
     await page.click("#buy-now-button");
-    await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => {});
+    await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => { });
 
     // ==========================================
     // 3. CHECKOUT: ADDRESS SELECTION
@@ -229,7 +229,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       await humanDelay(1500, 3000);
 
       await addressButton.click();
-      await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => {});
+      await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => { });
     }
 
     // ==========================================
@@ -345,7 +345,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         await usePaymentBtn.click();
         await page
           .waitForLoadState("commit", { timeout: 60000 })
-          .catch(() => {});
+          .catch(() => { });
       }
     }
 
@@ -358,6 +358,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     const totalLocator = page
       .locator(".grand-total-price, #sc-subtotal-amount-buybox, span.payByLine")
       .first();
+
     if ((await totalLocator.count()) > 0) {
       let grandTotal = parseFloat(
         (await totalLocator.innerText()).replace(/[^\d.-]/g, ""),
@@ -374,7 +375,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
             checkout_total: grandTotal,
             created_at: new Date().toISOString(),
           });
-        } catch (e) {}
+        } catch (e) { }
         return;
       }
     }
@@ -396,14 +397,14 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       if (config.paymentMethod === "NETBANKING") {
         log("⚠️ ACTION REQUIRED: Bank Payment Gateway detected.", "warn");
         log(
-          "Bot is PAUSED. Please complete the Net Banking payment manually. (5 minute timeout)",
+          "Bot is PAUSED. Please complete the Net Banking payment manually. (60 seconds timeout)",
           "warn",
         );
 
-        // STEP 1 & 2: Resilient polling to wait for the user to return to Amazon
+        // Resilient polling to wait for the user to return to Amazon
         let timeElapsed = 0;
         let paymentSuccess = false;
-        const maxWait = 6000; // 5 minutes
+        const maxWait = 60000; // Exact 60 Seconds
 
         while (timeElapsed < maxWait) {
           try {
@@ -427,112 +428,116 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
         if (!paymentSuccess) {
           log(
-            "Condition Failed: Manual payment verification timed out.",
-            "error",
+            "60 seconds limit reached on Payment Gateway. Proceeding to Orders page for verification...",
+            "warn",
           );
-          throw new Error("Failed due to Payment Gateway Timeout.");
+        } else {
+          log("Payment complete. Returned to Amazon.", "success");
         }
 
-        log("Payment complete. Returned to Amazon.", "success");
-        await humanDelay(3000, 5000);
+        await humanDelay(2000, 4000);
       } else {
         await page
           .waitForLoadState("commit", { timeout: 60000 })
           .catch(() => {});
         log("Order sequence submitted!", "success");
       }
+
+      // ==========================================
+      // STEP 6: FETCH DETAILED ORDER DATA & SUB-COLLECTION DB UPDATE (SINGLE PAGE LOAD)
+      // ==========================================
+      log("Step 6: Fetching Order Details from history...");
+      await humanDelay(3000, 5000);
+
+      // Sif tabhi navigate karein jab browser pehle se orders page par na ho
+      const currentUrl = page.url().toLowerCase();
+      if (!currentUrl.includes("your-orders/orders")) {
+        await page.goto("https://www.amazon.in/your-orders/orders", {
+          waitUntil: "commit",
+          timeout: 60000,
+        });
+        await humanDelay(3000, 5000);
+      }
+
+      const firstOrderCard = page
+        .locator(".order-card, .js-order-card, .yohtmlc-order-card, .a-box-group")
+        .first();
+      let orderBlockText = "";
+
+      if ((await firstOrderCard.count()) > 0) {
+        orderBlockText = await firstOrderCard.innerText();
+      } else {
+        orderBlockText = await page.innerText("body");
+      }
+
+      const orderIdMatch = orderBlockText.match(/\d{3}-\d{7}-\d{7}/);
+      const orderId = orderIdMatch ? orderIdMatch[0] : "Not Found";
+
+      const titleLocator = page
+        .locator(
+          ".yohtmlc-product-title, .a-link-normal, .a-link-normal.yohtmlc-item-title, .a-link-normal:has(.a-text-bold)",
+        )
+        .first();
+      let productName = "Unknown Product";
+      if ((await titleLocator.count()) > 0) {
+        productName = (await titleLocator.innerText()).trim();
+      }
+
+      const orderTotalLocator = page
+        .locator(".yohtmlc-order-total, .a-color-price, .value")
+        .first();
+      let orderPrice = "Unknown Price";
+      if ((await orderTotalLocator.count()) > 0) {
+        orderPrice = (await orderTotalLocator.innerText()).trim();
+      }
+
+      let orderStatus = "Success";
+      const blockTextLower = orderBlockText.toLowerCase();
+
+      if (
+        blockTextLower.includes("payment failed") ||
+        blockTextLower.includes("attention is required") ||
+        blockTextLower.includes("action required") ||
+        blockTextLower.includes("revise payment") ||
+        blockTextLower.includes("cancelled")
+      ) {
+        orderStatus = "Failed";
+      }
+
+      log(
+        `Order Details Captured -> ID: ${orderId} | Status: ${orderStatus} | Price: ${orderPrice}`,
+      );
+
+      try {
+        await db.collection("automations").doc(docId).collection(email).add({
+          order_id: orderId,
+          product_name: productName,
+          order_price: orderPrice,
+          status: orderStatus,
+          created_at: new Date().toISOString(),
+        });
+
+        await db.collection("automations").doc(docId).update({
+          last_activity: new Date().toISOString(),
+        });
+
+        log(
+          `Database sub-collection '${email}' successfully updated with order details.`,
+          "success",
+        );
+      } catch (e) {
+        log(
+          "Warning: Could not save final details to database (Network Timeout).",
+          "warn",
+        );
+      }
+
+      keepOpenForUser = true;
     } else {
       throw new Error(
         "Could not locate the 'Place Order' button on the final page.",
       );
     }
-
-    // ==========================================
-    // 6. FETCH DETAILED ORDER DATA & SUB-COLLECTION DB UPDATE
-    // ==========================================
-    log("Step 6: Fetching Order Details from history...");
-    await humanDelay(5000, 8000);
-
-    await page.goto("https://www.amazon.in/your-orders/orders", {
-      waitUntil: "commit",
-      timeout: 60000,
-    });
-    await humanDelay(4000, 6000);
-
-    const firstOrderCard = page
-      .locator(".order-card, .js-order-card, .yohtmlc-order-card, .a-box-group")
-      .first();
-    let orderBlockText = "";
-
-    if ((await firstOrderCard.count()) > 0) {
-      orderBlockText = await firstOrderCard.innerText();
-    } else {
-      orderBlockText = await page.innerText("body");
-    }
-
-    const orderIdMatch = orderBlockText.match(/\d{3}-\d{7}-\d{7}/);
-    const orderId = orderIdMatch ? orderIdMatch[0] : "Not Found";
-
-    const titleLocator = page
-      .locator(
-        ".yohtmlc-product-title, .a-link-normal, .a-link-normal.yohtmlc-item-title, .a-link-normal:has(.a-text-bold)",
-      )
-      .first();
-    let productName = "Unknown Product";
-    if ((await titleLocator.count()) > 0) {
-      productName = (await titleLocator.innerText()).trim();
-    }
-
-    const orderTotalLocator = page
-      .locator(".yohtmlc-order-total, .a-color-price, .value")
-      .first();
-    let orderPrice = "Unknown Price";
-    if ((await orderTotalLocator.count()) > 0) {
-      orderPrice = (await orderTotalLocator.innerText()).trim();
-    }
-
-    let orderStatus = "Success";
-    const blockTextLower = orderBlockText.toLowerCase();
-
-    if (
-      blockTextLower.includes("payment failed") ||
-      blockTextLower.includes("attention is required") ||
-      blockTextLower.includes("action required") ||
-      blockTextLower.includes("revise payment") ||
-      blockTextLower.includes("cancelled")
-    ) {
-      orderStatus = "Failed";
-    }
-
-    log(
-      `Order Details Captured -> ID: ${orderId} | Status: ${orderStatus} | Price: ${orderPrice}`,
-    );
-
-    try {
-      await db.collection("automations").doc(docId).collection(email).add({
-        order_id: orderId,
-        product_name: productName,
-        order_price: orderPrice,
-        status: orderStatus,
-        created_at: new Date().toISOString(),
-      });
-
-      await db.collection("automations").doc(docId).update({
-        last_activity: new Date().toISOString(),
-      });
-
-      log(
-        `Database sub-collection '${email}' successfully updated with order details.`,
-        "success",
-      );
-    } catch (e) {
-      log(
-        "Warning: Could not save final details to database (Network Timeout).",
-        "warn",
-      );
-    }
-
-    keepOpenForUser = true;
   } catch (error) {
     log(`ERROR: Sequence interrupted: ${error.message}`, "error");
     if (docId) {
