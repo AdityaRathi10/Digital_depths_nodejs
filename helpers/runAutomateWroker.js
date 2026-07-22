@@ -94,10 +94,14 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         "Condition Failed: Password incorrect or account alert triggered.",
         "error",
       );
-      await db.collection("automations").doc(docId).collection(email).add({
-        status: "Failed - Invalid Password",
-        created_at: new Date().toISOString(),
-      });
+      try {
+        await db.collection("automations").doc(docId).collection(email).add({
+          status: "Failed - Invalid Password",
+          created_at: new Date().toISOString(),
+        });
+      } catch (e) {
+        log("Database warning: Could not save failure status.", "warn");
+      }
       return;
     }
 
@@ -124,7 +128,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       try {
         await page.waitForSelector("#nav-logo, #nav-cart, #nav-belt", {
           state: "attached",
-          timeout: 600000,
+          timeout: 300000, // 5 min
         });
         log("Manual verification complete. Resuming automation...", "success");
         await humanDelay(2000, 4000);
@@ -161,12 +165,14 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           "error",
         );
 
-        await db.collection("automations").doc(docId).collection(email).add({
-          status: "Failed - Price Exceeded Limit",
-          product_link: config.productLink,
-          price_found: currentPrice,
-          created_at: new Date().toISOString(),
-        });
+        try {
+          await db.collection("automations").doc(docId).collection(email).add({
+            status: "Failed - Price Exceeded Limit",
+            product_link: config.productLink,
+            price_found: currentPrice,
+            created_at: new Date().toISOString(),
+          });
+        } catch (e) {}
         return;
       }
       log(`Price verified: ₹${currentPrice}`);
@@ -200,10 +206,8 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     }
 
     log("Clicking 'Buy Now'...");
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-      page.click("#buy-now-button"),
-    ]);
+    await page.click("#buy-now-button");
+    await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => {});
 
     // ==========================================
     // 3. CHECKOUT: ADDRESS SELECTION
@@ -223,10 +227,9 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     ) {
       log("Clicking 'Deliver to this address'...");
       await humanDelay(1500, 3000);
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-        addressButton.click(),
-      ]);
+
+      await addressButton.click();
+      await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => {});
     }
 
     // ==========================================
@@ -339,10 +342,10 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         (await usePaymentBtn.count()) > 0 &&
         (await usePaymentBtn.isVisible())
       ) {
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-          usePaymentBtn.click(),
-        ]);
+        await usePaymentBtn.click();
+        await page
+          .waitForLoadState("commit", { timeout: 60000 })
+          .catch(() => {});
       }
     }
 
@@ -365,11 +368,13 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           "error",
         );
 
-        await db.collection("automations").doc(docId).collection(email).add({
-          status: "Failed - Total Exceeded Limit",
-          checkout_total: grandTotal,
-          created_at: new Date().toISOString(),
-        });
+        try {
+          await db.collection("automations").doc(docId).collection(email).add({
+            status: "Failed - Total Exceeded Limit",
+            checkout_total: grandTotal,
+            created_at: new Date().toISOString(),
+          });
+        } catch (e) {}
         return;
       }
     }
@@ -384,49 +389,56 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     if ((await placeOrderBtn.count()) > 0) {
       log("Clicking 'Place Your Order'...");
       await humanDelay(2000, 4000);
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-        placeOrderBtn.click(),
-      ]);
 
-      // INTERCEPT: Check if we left Amazon for a bank payment gateway
-      const postOrderUrl = page.url().toLowerCase();
+      await placeOrderBtn.click();
+      await humanDelay(3000, 5000);
 
-      if (
-        config.paymentMethod === "NETBANKING" ||
-        !postOrderUrl.includes("amazon.in")
-      ) {
+      if (config.paymentMethod === "NETBANKING") {
         log("⚠️ ACTION REQUIRED: Bank Payment Gateway detected.", "warn");
         log(
-          "Bot is PAUSED. Please complete the Net Banking payment manually. (10 min timeout)",
+          "Bot is PAUSED. Please complete the Net Banking payment manually. (5 minute timeout)",
           "warn",
         );
 
-        try {
-          // Wait for the URL to return to an Amazon success or orders page
-          await page.waitForFunction(
-            () => {
-              const current = window.location.href.toLowerCase();
-              return (
-                current.includes("amazon.in") &&
-                (current.includes("thankyou") ||
-                  current.includes("your-orders") ||
-                  current.includes("order-details"))
-              );
-            },
-            { timeout: 600000 },
-          ); // 600,000ms = 10 minutes
+        // STEP 1 & 2: Resilient polling to wait for the user to return to Amazon
+        let timeElapsed = 0;
+        let paymentSuccess = false;
+        const maxWait = 300000; // 5 minutes
 
-          log("Payment complete. Returned to Amazon.", "success");
-          await humanDelay(3000, 5000);
-        } catch (e) {
+        while (timeElapsed < maxWait) {
+          try {
+            const currentUrl = page.url().toLowerCase();
+            if (
+              currentUrl.includes("amazon.in") &&
+              (currentUrl.includes("thankyou") ||
+                currentUrl.includes("your-orders") ||
+                currentUrl.includes("order-details") ||
+                currentUrl.includes("buy/thankyou"))
+            ) {
+              paymentSuccess = true;
+              break;
+            }
+          } catch (err) {
+            // Ignore execution context errors during redirection
+          }
+          await page.waitForTimeout(5000); // Check every 5 seconds
+          timeElapsed += 5000;
+        }
+
+        if (!paymentSuccess) {
           log(
-            "Condition Failed: Manual payment verification timed out after 10 minutes.",
+            "Condition Failed: Manual payment verification timed out.",
             "error",
           );
           throw new Error("Failed due to Payment Gateway Timeout.");
         }
+
+        log("Payment complete. Returned to Amazon.", "success");
+        await humanDelay(3000, 5000);
       } else {
+        await page
+          .waitForLoadState("commit", { timeout: 60000 })
+          .catch(() => {});
         log("Order sequence submitted!", "success");
       }
     } else {
@@ -463,7 +475,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
     const titleLocator = page
       .locator(
-        ".yohtmlc-product-title, .a-link-normal.yohtmlc-item-title, .a-link-normal:has(.a-text-bold)",
+        ".yohtmlc-product-title, .a-link-normal, .a-link-normal.yohtmlc-item-title, .a-link-normal:has(.a-text-bold)",
       )
       .first();
     let productName = "Unknown Product";
@@ -496,36 +508,46 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       `Order Details Captured -> ID: ${orderId} | Status: ${orderStatus} | Price: ${orderPrice}`,
     );
 
-    await db.collection("automations").doc(docId).collection(email).add({
-      order_id: orderId,
-      product_name: productName,
-      order_price: orderPrice,
-      status: orderStatus,
-      created_at: new Date().toISOString(),
-    });
+    try {
+      await db.collection("automations").doc(docId).collection(email).add({
+        order_id: orderId,
+        product_name: productName,
+        order_price: orderPrice,
+        status: orderStatus,
+        created_at: new Date().toISOString(),
+      });
 
-    await db.collection("automations").doc(docId).update({
-      last_activity: new Date().toISOString(),
-    });
+      await db.collection("automations").doc(docId).update({
+        last_activity: new Date().toISOString(),
+      });
 
-    log(
-      `Database sub-collection '${email}' successfully updated with order details.`,
-      "success",
-    );
+      log(
+        `Database sub-collection '${email}' successfully updated with order details.`,
+        "success",
+      );
+    } catch (e) {
+      log(
+        "Warning: Could not save final details to database (Network Timeout).",
+        "warn",
+      );
+    }
+
     keepOpenForUser = true;
   } catch (error) {
     log(`ERROR: Sequence interrupted: ${error.message}`, "error");
     if (docId) {
-      await db
-        .collection("automations")
-        .doc(docId)
-        .collection(email)
-        .add({
+      try {
+        await db.collection("automations").doc(docId).collection(email).add({
           status: "Failed - Execution Error",
           error_message: error.message,
           created_at: new Date().toISOString(),
-        })
-        .catch((e) => console.error("DB Error:", e));
+        });
+      } catch (e) {
+        log(
+          "Warning: Could not save error status to database (Network Timeout).",
+          "warn",
+        );
+      }
     }
   } finally {
     if (context && !keepOpenForUser) {
