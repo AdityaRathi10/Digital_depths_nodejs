@@ -128,7 +128,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       try {
         await page.waitForSelector("#nav-logo, #nav-cart, #nav-belt", {
           state: "attached",
-          timeout: 300000, // 5 min
+          timeout: 60000, // 60 seconds
         });
         log("Manual verification complete. Resuming automation...", "success");
         await humanDelay(2000, 4000);
