@@ -128,13 +128,13 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       try {
         await page.waitForSelector("#nav-logo, #nav-cart, #nav-belt", {
           state: "attached",
-          timeout: 60000, // 60 seconds
+          timeout: 300000, //5 Miniutes
         });
         log("Manual verification complete. Resuming automation...", "success");
         await humanDelay(2000, 4000);
       } catch (e) {
         log(
-          "Condition Failed: Manual verification timed out after 60 seconds.",
+          "Condition Failed: Manual verification timed out after 5 Miniutes.",
           "error",
         );
         throw new Error("Failed due to OTP Timeout.");
@@ -403,7 +403,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         // STEP 1 & 2: Resilient polling to wait for the user to return to Amazon
         let timeElapsed = 0;
         let paymentSuccess = false;
-        const maxWait = 300000; // 5 minutes
+        const maxWait = 6000; // 5 minutes
 
         while (timeElapsed < maxWait) {
           try {
