@@ -134,7 +134,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         await humanDelay(2000, 4000);
       } catch (e) {
         log(
-          "Condition Failed: Manual verification timed out after 5 minutes.",
+          "Condition Failed: Manual verification timed out after 60 seconds.",
           "error",
         );
         throw new Error("Failed due to OTP Timeout.");
