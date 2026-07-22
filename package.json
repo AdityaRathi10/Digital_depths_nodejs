@@ -30,15 +30,21 @@
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
     "concurrently": "^10.0.3",
+    "esbuild": "^0.28.1",
     "pkg": "^5.8.1",
     "tailwindcss": "^4.3.3"
   },
   "pkg": {
-    "scripts": "node_modules/firebase-admin/**/*.js",
+    "scripts": [
+      "node_modules/firebase-admin/**/*.js",
+      "node_modules/playwright/**/*.js",
+      "node_modules/playwright-core/**/*.js",
+      "node_modules/chromium-bidi/**/*.js"
+    ],
     "assets": [
       "views/**/*",
       "public/**/*",
-      "config/**/*" 
+      "config/**/*"
     ]
   }
 }

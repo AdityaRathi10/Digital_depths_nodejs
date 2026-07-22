@@ -2,7 +2,14 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
   const log = (msg, type = "info") =>
     socket.emit("log", { type, msg: `[${email}] ${msg}` });
 
-  const context = await browser.newContext({ viewport: null });
+  const context = await browser.newContext({
+    viewport: null,
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    extraHTTPHeaders: {
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
   let page;
   let docId = null;
   let keepOpenForUser = false;
@@ -40,7 +47,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     log("Navigating to Amazon Sign-In...");
     await page.goto(
       "https://www.amazon.in/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.in%2F%3Fref_%3Dnav_ya_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
-      { waitUntil: "domcontentloaded" },
+      { waitUntil: "commit", timeout: 60000 },
     );
     await humanDelay(2000, 4000);
 
@@ -117,7 +124,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       try {
         await page.waitForSelector("#nav-logo, #nav-cart, #nav-belt", {
           state: "attached",
-          timeout: 300000,
+          timeout: 600000,
         });
         log("Manual verification complete. Resuming automation...", "success");
         await humanDelay(2000, 4000);
@@ -137,7 +144,10 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     // ==========================================
     log("Login successful. Navigating to product...");
     await humanDelay(3000, 6000);
-    await page.goto(config.productLink, { waitUntil: "domcontentloaded" });
+    await page.goto(config.productLink, {
+      waitUntil: "commit",
+      timeout: 60000,
+    });
     await humanDelay(4000, 7000);
 
     const priceBoxLocator = page.locator(".a-price-whole").first();
@@ -432,7 +442,8 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     await humanDelay(5000, 8000);
 
     await page.goto("https://www.amazon.in/your-orders/orders", {
-      waitUntil: "domcontentloaded",
+      waitUntil: "commit",
+      timeout: 60000,
     });
     await humanDelay(4000, 6000);
 

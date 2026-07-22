@@ -3,7 +3,8 @@ const { getFirestore } = require("firebase-admin/firestore");
 const path = require("path");
 const fs = require("fs");
 
-let KEY_PATH = path.join(
+// 1. The path when running normally via 'node app.js'
+const devPath = path.join(
   __dirname,
   "..",
   "..",
@@ -11,14 +12,32 @@ let KEY_PATH = path.join(
   "digital-deaft-firebase-key.json",
 );
 
-// Cloud Fallback: If it doesn't exist in 'config', look in the root directory (Render)
-if (!fs.existsSync(KEY_PATH)) {
-  KEY_PATH = path.join(
-    __dirname,
-    "..",
-    "..",
-    "digital-deaft-firebase-key.json",
-  );
+// 2. The path when running inside the compiled .exe (from dist/bundle.js)
+const exePath = path.join(
+  __dirname,
+  "..",
+  "config",
+  "digital-deaft-firebase-key.json",
+);
+
+// 3. A final fallback checking the current working directory
+const rootPath = path.join(
+  process.cwd(),
+  "config",
+  "digital-deaft-firebase-key.json",
+);
+
+let KEY_PATH;
+
+// Smartly detect which environment we are in
+if (fs.existsSync(devPath)) {
+  KEY_PATH = devPath;
+} else if (fs.existsSync(exePath)) {
+  KEY_PATH = exePath;
+} else if (fs.existsSync(rootPath)) {
+  KEY_PATH = rootPath;
+} else {
+  console.error("FATAL ERROR: Could not find the Firebase config JSON file!");
 }
 
 // Initialize the app cleanly using the service account certificate

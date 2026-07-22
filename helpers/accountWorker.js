@@ -2,7 +2,14 @@ async function runAccountSetupWorker(browser, email, password, socket, db) {
   const log = (msg, type = "info") =>
     socket.emit("log", { type, msg: `[${email}] ${msg}` });
 
-  const context = await browser.newContext({ viewport: null });
+  const context = await browser.newContext({
+    viewport: null,
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    extraHTTPHeaders: {
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
   let page;
   let docId = null;
 
@@ -47,7 +54,7 @@ async function runAccountSetupWorker(browser, email, password, socket, db) {
     log("Opening browser and navigating to Amazon Sign-In...");
     await page.goto(
       "https://www.amazon.in/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.in%2F%3Fref_%3Dnav_ya_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
-      { waitUntil: "domcontentloaded" },
+      { waitUntil: "commit", timeout: 60000 },
     );
     await humanDelay(2000, 3500);
 
@@ -144,7 +151,7 @@ async function runAccountSetupWorker(browser, email, password, socket, db) {
         // Pause automation until the main Amazon Navigation bar loads (indicating successful login)
         await page.waitForSelector("#nav-logo, #nav-cart, #nav-belt", {
           state: "attached",
-          timeout: 300000,
+          timeout: 600000,
         });
         log("Manual verification complete. Resuming automation...", "success");
         await humanDelay(2000, 4000);
@@ -170,7 +177,8 @@ async function runAccountSetupWorker(browser, email, password, socket, db) {
     // ==========================================
     log("Navigating to Cart page...");
     await page.goto("https://www.amazon.in/gp/cart/view.html", {
-      waitUntil: "domcontentloaded",
+      waitUntil: "commit",
+      timeout: 60000,
     });
     await humanDelay(2500, 4500);
 
@@ -213,7 +221,8 @@ async function runAccountSetupWorker(browser, email, password, socket, db) {
     // ==========================================
     log("Navigating to Saved Addresses page...");
     await page.goto("https://www.amazon.in/a/addresses", {
-      waitUntil: "domcontentloaded",
+      waitUntil: "commit",
+      timeout: 60000,
     });
     await humanDelay(3000, 5000);
 
