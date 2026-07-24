@@ -1,5 +1,6 @@
 const { db } = require("../../backend/firebase");
 
+// 1. Fetch all email accounts
 async function getAllMail(req, res) {
   try {
     const snapshot = await db.collection("automations").get();
@@ -24,6 +25,7 @@ async function getAllMail(req, res) {
   }
 }
 
+// 2. Fetch all orders
 async function getOrders(req, res) {
   try {
     const accountsSnapshot = await db.collection("automations").get();
@@ -71,4 +73,38 @@ async function getOrders(req, res) {
   }
 }
 
-module.exports = { getAllMail, getOrders };
+// 3. NEW: Delete email document from database
+async function deleteEmail(req, res) {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Email is required" });
+    }
+
+    // Search for documents matching the email
+    const snapshot = await db
+      .collection("automations")
+      .where("email", "==", email)
+      .get();
+
+    if (snapshot.empty) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Account not found in database" });
+    }
+
+    // Delete matching document(s)
+    const deletePromises = snapshot.docs.map((doc) => doc.ref.delete());
+    await Promise.all(deletePromises);
+
+    res.json({ success: true, message: "Email deleted successfully" });
+  } catch (error) {
+    console.error("Failed to delete email:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+module.exports = { getAllMail, getOrders, deleteEmail };
