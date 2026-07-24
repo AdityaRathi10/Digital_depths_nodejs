@@ -145,24 +145,86 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     }
 
     // ==========================================
+    // 1.5 CART VERIFICATION & CLEARANCE
+    // ==========================================
+    log("Navigating to Cart to check for existing items...");
+    await page.goto("https://www.amazon.in/cart", {
+      waitUntil: "commit",
+      timeout: 60000,
+    });
+    await humanDelay(3000, 5000);
+
+    let deleteLocators = page.locator(
+      'input[value="Delete"], .sc-action-delete input',
+    );
+    let itemCount = await deleteLocators.count();
+
+    if (itemCount > 0) {
+      log(
+        `Cart is not empty. Found ${itemCount} item(s). Clearing cart...`,
+        "warn",
+      );
+
+      while (itemCount > 0) {
+        await deleteLocators.first().click();
+        await humanDelay(2000, 4000); // Give Amazon's DOM time to update dynamically
+
+        // Re-evaluate the locator to find remaining items
+        deleteLocators = page.locator(
+          'input[value="Delete"], .sc-action-delete input',
+        );
+        itemCount = await deleteLocators.count();
+      }
+
+      log("Cart cleared successfully.", "success");
+    } else {
+      log("Cart is already empty. Proceeding normally.", "info");
+    }
+
+    // ==========================================
     // 2. ORDER AUTOMATION LOOP (RUNS ON CURRENT TAB)
     // ==========================================
     const totalOrders = Math.max(1, parseInt(config.ordersPerAccount) || 1);
-    log(`🚀 Starting Automation Loop: Total ${totalOrders} order(s) to process on current tab.`);
+    log(
+      `🚀 Starting Automation Loop: Total ${totalOrders} order(s) to process on current tab.`,
+    );
 
     for (let orderIndex = 1; orderIndex <= totalOrders; orderIndex++) {
       log(`----------------------------------------`);
-      log(`📦 Processing Order ${orderIndex} of ${totalOrders} [Current Tab]...`);
+      log(
+        `📦 Processing Order ${orderIndex} of ${totalOrders} [Current Tab]...`,
+      );
       log(`----------------------------------------`);
+
+      // We will store the captured product name here for the whole loop cycle
+      let capturedProductName = "Unknown Product";
 
       try {
         // --- PRODUCT PAGE & BUY NOW ---
-        log(`[Order ${orderIndex}/${totalOrders}] Navigating to product page...`);
+        log(
+          `[Order ${orderIndex}/${totalOrders}] Navigating to product page...`,
+        );
         await page.goto(config.productLink, {
           waitUntil: "commit",
           timeout: 60000,
         });
         await humanDelay(3000, 6000);
+
+        // --- NEW: CAPTURE PRODUCT TITLE FROM DETAIL PAGE ---
+        try {
+          const titleElement = page.locator("#productTitle").first();
+          if ((await titleElement.count()) > 0) {
+            capturedProductName = (await titleElement.innerText()).trim();
+            log(
+              `Captured Product Title: ${capturedProductName.substring(0, 40)}...`,
+              "success",
+            );
+          } else {
+            log("Warning: #productTitle not found on product page.", "warn");
+          }
+        } catch (titleErr) {
+          log("Warning: Failed to extract product title.", "warn");
+        }
 
         const priceBoxLocator = page.locator(".a-price-whole").first();
         if ((await priceBoxLocator.count()) > 0) {
@@ -174,55 +236,161 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
               `Condition Failed [Order ${orderIndex}]: Price (₹${currentPrice}) exceeds Max Limit (₹${config.maxPrice}). Skipping this order.`,
               "error",
             );
-            await db.collection("automations").doc(docId).collection(email).add({
-              order_number: orderIndex,
-              status: "Failed - Price Exceeded Limit",
-              product_link: config.productLink,
-              price_found: currentPrice,
-              created_at: new Date().toISOString(),
-            });
+            await db
+              .collection("automations")
+              .doc(docId)
+              .collection(email)
+              .add({
+                order_number: orderIndex,
+                status: "Failed - Price Exceeded Limit",
+                product_link: config.productLink,
+                price_found: currentPrice,
+                created_at: new Date().toISOString(),
+              });
             continue; // Proceed to next order
           }
           log(`Price verified: ₹${currentPrice}`);
         }
 
-        // --- UPDATED SLOWER & ROBUST QUANTITY SELECTION ---
+        // --- QUANTITY SELECTION (Handles both Dropdowns & Input Fields) ---
         if (parseInt(config.quantity) > 1) {
           log(`Adjusting quantity to ${config.quantity}...`);
-          
-          // Extra pause to let slow network/dynamic dropdown scripts finish rendering
           await humanDelay(3500, 5500);
 
-          const qtyLocator = page
+          const qtyDropdown = page
             .locator(
               "select#quantity, select[name='quantity'], select.a-native-dropdown",
             )
             .first();
+          const qtyInput = page
+            .locator(
+              "input.quantity-text-input-with-label, div.quantity-text-input-container input",
+            )
+            .first();
 
           try {
-            // Explicitly wait up to 12s for the quantity dropdown to become visible in DOM
-            await qtyLocator.waitFor({ state: "visible", timeout: 12000 });
-            await humanDelay(1500, 3000);
+            if (
+              (await qtyDropdown.count()) > 0 &&
+              (await qtyDropdown.isVisible())
+            ) {
+              log("Found quantity dropdown. Updating...");
+              await qtyDropdown.selectOption(config.quantity.toString());
+              await humanDelay(3000, 5000);
+              log("Quantity successfully updated via dropdown.", "success");
+            } else if (
+              (await qtyInput.count()) > 0 &&
+              (await qtyInput.isVisible())
+            ) {
+              log("Found quantity text input. Updating...");
+              await qtyInput.fill(config.quantity.toString());
+              await humanDelay(1000, 2000);
 
-            await qtyLocator.selectOption(config.quantity.toString());
-            log("Quantity successfully updated.", "success");
-            
-            // Allow Amazon page time to process quantity change before clicking buy
-            await humanDelay(3000, 5000);
+              // Press Enter to submit the input (handles both page reload and AJAX updates)
+              await qtyInput.press("Enter");
+
+              // Safely wait for potential page reload without crashing if it doesn't reload
+              await page
+                .waitForLoadState("domcontentloaded", { timeout: 5000 })
+                .catch(() => {});
+              await humanDelay(3000, 5000);
+              log("Quantity successfully updated via text input.", "success");
+            } else {
+              log(
+                `Warning: Quantity dropdown/input not found or not visible. Proceeding with default.`,
+                "warn",
+              );
+            }
           } catch (err) {
             log(
-              `Warning: Quantity dropdown not visible or failed to update to ${config.quantity}. Attempting to proceed anyway.`,
+              `Warning: Failed to update quantity to ${config.quantity}. Attempting to proceed anyway. Error: ${err.message}`,
               "warn",
             );
           }
         }
 
-        log("Clicking 'Buy Now'...");
-        await page.click("#buy-now-button");
-        await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => {});
+        // --- BUY NOW / ADD TO CART FALLBACK ---
+        log("Looking for 'Buy Now' button...");
+        const buyNowBtn = page.locator("#buy-now-button").first();
+        let buyNowSuccess = false;
+
+        if (
+          (await buyNowBtn.count()) > 0 &&
+          (await buyNowBtn.isVisible()) &&
+          (await buyNowBtn.isEnabled())
+        ) {
+          try {
+            log("Clicking 'Buy Now'...");
+            await buyNowBtn.click({ timeout: 5000 });
+            await page
+              .waitForLoadState("commit", { timeout: 60000 })
+              .catch(() => {});
+            buyNowSuccess = true;
+          } catch (e) {
+            log(
+              "Warning: 'Buy Now' button click failed or intercepted.",
+              "warn",
+            );
+          }
+        }
+
+        if (!buyNowSuccess) {
+          log(
+            "Warning: 'Buy Now' button missing, disabled, or failed. Attempting 'Add to Cart' fallback...",
+            "warn",
+          );
+          const addToCartBtn = page
+            .locator(
+              "#add-to-cart-button, input[name='submit.add-to-cart'], #freshAddToCartButton input, input[aria-labelledby='freshAddToCartButton-announce']",
+            )
+            .first();
+
+          if (
+            (await addToCartBtn.count()) > 0 &&
+            (await addToCartBtn.isVisible())
+          ) {
+            await addToCartBtn.click({ timeout: 5000 });
+            log(
+              "Clicked 'Add to Cart'. Redirecting to Cart page...",
+              "success",
+            );
+            await humanDelay(3000, 5000);
+
+            log(
+              `[Order ${orderIndex}/${totalOrders}] Bot stopped at Cart for manual review.`,
+              "warn",
+            );
+            await page.goto("https://www.amazon.in/cart", {
+              waitUntil: "commit",
+              timeout: 60000,
+            });
+            await humanDelay(2000, 4000);
+
+            try {
+              await db
+                .collection("automations")
+                .doc(docId)
+                .collection(email)
+                .add({
+                  order_number: orderIndex,
+                  status: "Failed - Buy Now Unavailable (Added to Cart)",
+                  product_link: config.productLink,
+                  created_at: new Date().toISOString(),
+                });
+            } catch (e) {}
+
+            keepOpenForUser = true;
+            continue; // Skip the rest of the checkout process for this order and jump to the next one (if any)
+          } else {
+            throw new Error(
+              "Neither 'Buy Now' nor 'Add to Cart' buttons were available or working.",
+            );
+          }
+        }
 
         // --- CHECKOUT: ADDRESS SELECTION ---
-        log(`[Order ${orderIndex}/${totalOrders}] Checking Address Selection...`);
+        log(
+          `[Order ${orderIndex}/${totalOrders}] Checking Address Selection...`,
+        );
         await humanDelay(4000, 6000);
 
         const addressButton = page
@@ -239,11 +407,15 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           await humanDelay(1500, 3000);
 
           await addressButton.click();
-          await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => {});
+          await page
+            .waitForLoadState("commit", { timeout: 60000 })
+            .catch(() => {});
         }
 
         // --- CHECKOUT: PAYMENT SELECTION ---
-        log(`[Order ${orderIndex}/${totalOrders}] Handling Payment Selection for: ${config.paymentMethod}...`);
+        log(
+          `[Order ${orderIndex}/${totalOrders}] Handling Payment Selection for: ${config.paymentMethod}...`,
+        );
         await humanDelay(3000, 5000);
 
         await page.evaluate(() => window.scrollBy(0, 400));
@@ -302,7 +474,9 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
                   { force: true, timeout: 5000 },
                 );
               } catch (e) {
-                const dropdownTrigger = page.locator(".a-dropdown-prompt").first();
+                const dropdownTrigger = page
+                  .locator(".a-dropdown-prompt")
+                  .first();
                 await dropdownTrigger.click({ force: true });
                 await humanDelay(1500, 3000);
 
@@ -356,11 +530,15 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         }
 
         // --- FINAL GRAND TOTAL & PLACE ORDER ---
-        log(`[Order ${orderIndex}/${totalOrders}] Verifying final Grand Total...`);
+        log(
+          `[Order ${orderIndex}/${totalOrders}] Verifying final Grand Total...`,
+        );
         await humanDelay(4000, 7000);
 
         const totalLocator = page
-          .locator(".grand-total-price, #sc-subtotal-amount-buybox, span.payByLine")
+          .locator(
+            ".grand-total-price, #sc-subtotal-amount-buybox, span.payByLine",
+          )
           .first();
 
         if ((await totalLocator.count()) > 0) {
@@ -373,12 +551,16 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
               "error",
             );
 
-            await db.collection("automations").doc(docId).collection(email).add({
-              order_number: orderIndex,
-              status: "Failed - Total Exceeded Limit",
-              checkout_total: grandTotal,
-              created_at: new Date().toISOString(),
-            });
+            await db
+              .collection("automations")
+              .doc(docId)
+              .collection(email)
+              .add({
+                order_number: orderIndex,
+                status: "Failed - Total Exceeded Limit",
+                checkout_total: grandTotal,
+                created_at: new Date().toISOString(),
+              });
             continue; // Proceed to next order
           }
         }
@@ -399,11 +581,13 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           // ==========================================
           // REAL-TIME PAGE ANALYZER (PENDING / DUPLICATE ORDER CHECK)
           // ==========================================
-          log("Analyzing page in real-time for pending order warnings / redirects...");
-          
+          log(
+            "Analyzing page in real-time for pending order warnings / redirects...",
+          );
+
           const pendingPayBtn = page
             .locator(
-              'input[value*="Pay with"], button:has-text("Pay with Net Banking"), span:has-text("Pay with Net Banking"), .a-button-input[aria-label*="Pay with"]'
+              'input[value*="Pay with"], button:has-text("Pay with Net Banking"), span:has-text("Pay with Net Banking"), .a-button-input[aria-label*="Pay with"]',
             )
             .first();
 
@@ -411,7 +595,10 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
             (await pendingPayBtn.count()) > 0 &&
             (await pendingPayBtn.isVisible())
           ) {
-            log("⚠️ Pending / Duplicate order screen detected! Clicking 'Pay with Net Banking'...", "warn");
+            log(
+              "⚠️ Pending / Duplicate order screen detected! Clicking 'Pay with Net Banking'...",
+              "warn",
+            );
             await pendingPayBtn.click();
             await humanDelay(4000, 6000);
           }
@@ -470,7 +657,9 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           }
 
           // --- FETCH ORDER DETAILS & UPDATE DB ---
-          log(`[Order ${orderIndex}/${totalOrders}] Fetching Order Details from history...`);
+          log(
+            `[Order ${orderIndex}/${totalOrders}] Fetching Order Details from history...`,
+          );
           await humanDelay(3000, 5000);
 
           const curUrl = page.url().toLowerCase();
@@ -483,7 +672,9 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           }
 
           const firstOrderCard = page
-            .locator(".order-card, .js-order-card, .yohtmlc-order-card, .a-box-group")
+            .locator(
+              ".order-card, .js-order-card, .yohtmlc-order-card, .a-box-group",
+            )
             .first();
           let orderBlockText = "";
 
@@ -495,16 +686,6 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
           const orderIdMatch = orderBlockText.match(/\d{3}-\d{7}-\d{7}/);
           const orderId = orderIdMatch ? orderIdMatch[0] : "Not Found";
-
-          const titleLocator = page
-            .locator(
-              ".yohtmlc-product-title, .a-link-normal, .a-link-normal.yohtmlc-item-title, .a-link-normal:has(.a-text-bold)",
-            )
-            .first();
-          let productName = "Unknown Product";
-          if ((await titleLocator.count()) > 0) {
-            productName = (await titleLocator.innerText()).trim();
-          }
 
           const orderTotalLocator = page
             .locator(".yohtmlc-order-total, .a-color-price, .value")
@@ -533,14 +714,18 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           );
 
           try {
-            await db.collection("automations").doc(docId).collection(email).add({
-              order_number: orderIndex,
-              order_id: orderId,
-              product_name: productName,
-              order_price: orderPrice,
-              status: orderStatus,
-              created_at: new Date().toISOString(),
-            });
+            await db
+              .collection("automations")
+              .doc(docId)
+              .collection(email)
+              .add({
+                order_number: orderIndex,
+                order_id: orderId,
+                product_name: capturedProductName, // <--- Using the variable we saved earlier
+                order_price: orderPrice,
+                status: orderStatus,
+                created_at: new Date().toISOString(),
+              });
 
             await db.collection("automations").doc(docId).update({
               last_activity: new Date().toISOString(),
@@ -557,18 +742,27 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
             );
           }
         } else {
-          throw new Error("Could not locate the 'Place Order' button on the final page.");
+          throw new Error(
+            "Could not locate the 'Place Order' button on the final page.",
+          );
         }
       } catch (orderError) {
         log(`ERROR on Order #${orderIndex}: ${orderError.message}`, "error");
+        keepOpenForUser = true; // Ensure browser stays open on catastrophic failure
+
         if (docId) {
           try {
-            await db.collection("automations").doc(docId).collection(email).add({
-              order_number: orderIndex,
-              status: "Failed - Execution Error",
-              error_message: orderError.message,
-              created_at: new Date().toISOString(),
-            });
+            await db
+              .collection("automations")
+              .doc(docId)
+              .collection(email)
+              .add({
+                order_number: orderIndex,
+                product_name: capturedProductName, // <--- Saving it even on error if it was grabbed
+                status: "Failed - Execution Error",
+                error_message: orderError.message,
+                created_at: new Date().toISOString(),
+              });
           } catch (e) {}
         }
       }
@@ -582,6 +776,8 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     keepOpenForUser = true;
   } catch (error) {
     log(`ERROR: Sequence interrupted: ${error.message}`, "error");
+    keepOpenForUser = true;
+
     if (docId) {
       try {
         await db.collection("automations").doc(docId).collection(email).add({
@@ -602,7 +798,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       await context.close();
     } else if (keepOpenForUser) {
       log(
-        "All configured orders finished! Automation bot detached.",
+        "Automation bot detached. The browser tab will remain open for your manual review.",
         "success",
       );
     }
