@@ -47,7 +47,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     // ==========================================
     log("Navigating to Amazon Sign-In...");
     await page.goto(
-      "https://www.amazon.in/ap/signin?openid.return_to=https%3A%2F%2Fwww.amazon.in%2F%3Fref_%3Dnav_ya_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
+      "https://www.amazon.in/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.in%2F%3Fref_%3Dnav_ya_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
       { waitUntil: "commit", timeout: 60000 },
     );
     await humanDelay(2000, 4000);
@@ -145,40 +145,6 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     }
 
     // ==========================================
-    // ADD-ON 1: CHECK & CLEAR CART POST-LOGIN
-    // ==========================================
-    log("🛒 Checking cart status post-login...");
-    await page.goto("https://www.amazon.in/gp/cart/view.html", {
-      waitUntil: "commit",
-      timeout: 60000,
-    });
-    await humanDelay(2500, 4500);
-
-    let deleteSelectors =
-      'input[value="Delete"], span[data-feature-id="delete-item-action"] input, .sc-action-delete input';
-    let deleteButtons = page.locator(deleteSelectors);
-    let cartItemCount = await deleteButtons.count();
-
-    if (cartItemCount > 0) {
-      log(`Cart is not empty! Found ${cartItemCount} existing item(s). Emptying cart...`, "warn");
-      while (cartItemCount > 0) {
-        const firstDeleteBtn = deleteButtons.first();
-        if (await firstDeleteBtn.isVisible()) {
-          log("Removing item from cart...");
-          await firstDeleteBtn.click();
-          await humanDelay(2000, 3500);
-        } else {
-          break;
-        }
-        deleteButtons = page.locator(deleteSelectors);
-        cartItemCount = await deleteButtons.count();
-      }
-      log("Cart successfully cleared!", "success");
-    } else {
-      log("Cart is verified empty.", "success");
-    }
-
-    // ==========================================
     // 2. ORDER AUTOMATION LOOP (RUNS ON CURRENT TAB)
     // ==========================================
     const totalOrders = Math.max(1, parseInt(config.ordersPerAccount) || 1);
@@ -190,7 +156,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       log(`----------------------------------------`);
 
       try {
-        // --- PRODUCT PAGE ---
+        // --- PRODUCT PAGE & BUY NOW ---
         log(`[Order ${orderIndex}/${totalOrders}] Navigating to product page...`);
         await page.goto(config.productLink, {
           waitUntil: "commit",
@@ -224,6 +190,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         if (parseInt(config.quantity) > 1) {
           log(`Adjusting quantity to ${config.quantity}...`);
           
+          // Extra pause to let slow network/dynamic dropdown scripts finish rendering
           await humanDelay(3500, 5500);
 
           const qtyLocator = page
@@ -233,12 +200,14 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
             .first();
 
           try {
+            // Explicitly wait up to 12s for the quantity dropdown to become visible in DOM
             await qtyLocator.waitFor({ state: "visible", timeout: 12000 });
             await humanDelay(1500, 3000);
 
             await qtyLocator.selectOption(config.quantity.toString());
             log("Quantity successfully updated.", "success");
             
+            // Allow Amazon page time to process quantity change before clicking buy
             await humanDelay(3000, 5000);
           } catch (err) {
             log(
@@ -248,78 +217,9 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           }
         }
 
-        // ==========================================
-        // ADD-ON 2: BUY NOW OR FALLBACK TO ADD TO CART
-        // ==========================================
-        const buyNowBtn = page.locator("#buy-now-button").first();
-        const isBuyNowAvailable =
-          (await buyNowBtn.count()) > 0 && (await buyNowBtn.isVisible());
-
-        if (isBuyNowAvailable) {
-          log("Clicking 'Buy Now'...");
-          await buyNowBtn.click();
-          await page
-            .waitForLoadState("commit", { timeout: 60000 })
-            .catch(() => {});
-        } else {
-          log(
-            "⚠️ 'Buy Now' button not found! Falling back to 'Add to Cart'...",
-            "warn",
-          );
-
-          const addToCartBtn = page
-            .locator("#add-to-cart-button, input[name='submit.add-to-cart']")
-            .first();
-
-          if (
-            (await addToCartBtn.count()) > 0 &&
-            (await addToCartBtn.isVisible())
-          ) {
-            await addToCartBtn.click();
-            log("Clicked 'Add to Cart'. Processing checkout pathway...");
-            await humanDelay(3000, 5000);
-
-            // Attempt to click 'Proceed to Checkout' from side drawer / pop-up if visible
-            const sideSheetCheckoutBtn = page
-              .locator(
-                "#attach-sidesheet-checkout-button, #sc-buy-box-ptc-button, input[name='proceedToRetailCheckout']",
-              )
-              .first();
-
-            if (
-              (await sideSheetCheckoutBtn.count()) > 0 &&
-              (await sideSheetCheckoutBtn.isVisible())
-            ) {
-              log("Clicking 'Proceed to Checkout' from cart drawer...");
-              await sideSheetCheckoutBtn.click();
-            } else {
-              log("Navigating to Cart page to trigger Checkout...");
-              await page.goto("https://www.amazon.in/gp/cart/view.html", {
-                waitUntil: "commit",
-                timeout: 60000,
-              });
-              await humanDelay(2000, 4000);
-
-              const cartCheckoutBtn = page
-                .locator(
-                  "input[name='proceedToRetailCheckout'], #sc-buy-box-ptc-button",
-                )
-                .first();
-              await cartCheckoutBtn.waitFor({
-                state: "visible",
-                timeout: 15000,
-              });
-              await cartCheckoutBtn.click();
-            }
-            await page
-              .waitForLoadState("commit", { timeout: 60000 })
-              .catch(() => {});
-          } else {
-            throw new Error(
-              "Neither 'Buy Now' nor 'Add to Cart' button was found on product page.",
-            );
-          }
-        }
+        log("Clicking 'Buy Now'...");
+        await page.click("#buy-now-button");
+        await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => {});
 
         // --- CHECKOUT: ADDRESS SELECTION ---
         log(`[Order ${orderIndex}/${totalOrders}] Checking Address Selection...`);
@@ -526,13 +426,13 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           if (config.paymentMethod === "NETBANKING" && isActualBankGateway) {
             log("⚠️ ACTION REQUIRED: Bank Payment Gateway detected.", "warn");
             log(
-              "Bot is PAUSED. Please complete the Net Banking payment manually. (10 seconds timeout)",
+              "Bot is PAUSED. Please complete the Net Banking payment manually. (60 seconds timeout)",
               "warn",
             );
 
             let timeElapsed = 0;
             let paymentSuccess = false;
-            const maxWait = 10000;
+            const maxWait = 5000;
 
             while (timeElapsed < maxWait) {
               try {
@@ -554,7 +454,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
             if (!paymentSuccess) {
               log(
-                "10 seconds limit reached on Payment Gateway. Proceeding to Orders page for verification...",
+                "60 seconds limit reached on Payment Gateway. Proceeding to Orders page for verification...",
                 "warn",
               );
             } else {
