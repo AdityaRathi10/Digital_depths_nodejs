@@ -11,6 +11,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     },
   });
 
+
   let docId = null;
   let keepOpenForUser = false;
 
@@ -22,6 +23,11 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     log(`[Bot-Evasion] Reading page... pausing for ${ms}ms.`);
     await page.waitForTimeout(ms);
   };
+
+  let page;
+  let docId = null;
+  let keepOpenForUser = false;
+
 
   try {
     log("Step 1: Fetching credentials from Firestore...");
@@ -42,8 +48,21 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     docId = snapshot.docs[0].id;
     const password = snapshot.docs[0].data().password;
 
+
     // ==========================================
     // 1. LOGIN SEQUENCE (ONCE PER ACCOUNT ON CURRENT TAB)
+
+    page = await context.newPage();
+
+    const humanDelay = async (min = 2500, max = 5500) => {
+      const ms = Math.floor(Math.random() * (max - min + 1)) + min;
+      log(`[Bot-Evasion] Reading page... pausing for ${ms}ms.`);
+      await page.waitForTimeout(ms);
+    };
+
+    // ==========================================
+    // 1. LOGIN SEQUENCE (WITH OTP INTERCEPT)
+
     // ==========================================
     log("Navigating to Amazon Sign-In...");
     await page.goto(
@@ -82,7 +101,10 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       .click();
     log("Submitted password. Waiting for Amazon response...");
 
+
     await page.waitForLoadState("domcontentloaded").catch(() => {});
+
+    await page.waitForLoadState("domcontentloaded").catch(() => { });
     await humanDelay(3000, 5000);
 
     const pwdErrorBox = page
@@ -129,13 +151,19 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       try {
         await page.waitForSelector("#nav-logo, #nav-cart, #nav-belt", {
           state: "attached",
+
           timeout: 300000, // 5 Minutes
+
+          timeout: 300000, //5 Miniutes
         });
         log("Manual verification complete. Resuming automation...", "success");
         await humanDelay(2000, 4000);
       } catch (e) {
         log(
+
           "Condition Failed: Manual verification timed out after 5 Minutes.",
+          "Condition Failed: Manual verification timed out after 5 Miniutes.",
+
           "error",
         );
         throw new Error("Failed due to OTP Timeout.");
@@ -145,6 +173,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     }
 
     // ==========================================
+
     // 2. ORDER AUTOMATION LOOP (RUNS ON CURRENT TAB)
     // ==========================================
     const totalOrders = Math.max(1, parseInt(config.ordersPerAccount) || 1);
@@ -580,6 +609,402 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
     }
 
     keepOpenForUser = true;
+
+    // 2. PRODUCT PAGE & BUY NOW
+    // ==========================================
+    log("Login successful. Navigating to product...");
+    await humanDelay(3000, 6000);
+    await page.goto(config.productLink, {
+      waitUntil: "commit",
+      timeout: 60000,
+    });
+    await humanDelay(4000, 7000);
+
+    const priceBoxLocator = page.locator(".a-price-whole").first();
+    if ((await priceBoxLocator.count()) > 0) {
+      let currentPrice = parseFloat(
+        (await priceBoxLocator.innerText()).replace(/,/g, ""),
+      );
+      if (currentPrice > parseFloat(config.maxPrice)) {
+        log(
+          `Condition Failed: Price (₹${currentPrice}) exceeds Max Limit (₹${config.maxPrice}).`,
+          "error",
+        );
+
+        try {
+          await db.collection("automations").doc(docId).collection(email).add({
+            status: "Failed - Price Exceeded Limit",
+            product_link: config.productLink,
+            price_found: currentPrice,
+            created_at: new Date().toISOString(),
+          });
+        } catch (e) { }
+        return;
+      }
+      log(`Price verified: ₹${currentPrice}`);
+    }
+
+    if (parseInt(config.quantity) > 1) {
+      log(`Adjusting quantity to ${config.quantity}...`);
+      const qtyLocator = page
+        .locator(
+          "select#quantity, select[name='quantity'], select.a-native-dropdown",
+        )
+        .first();
+
+      if ((await qtyLocator.count()) > 0 && (await qtyLocator.isVisible())) {
+        try {
+          await qtyLocator.selectOption(config.quantity.toString());
+          log("Quantity successfully updated.");
+          await humanDelay(2500, 4500);
+        } catch (err) {
+          log(
+            `Warning: Found dropdown but failed to select ${config.quantity}. Attempting to proceed anyway.`,
+            "warn",
+          );
+        }
+      } else {
+        log(
+          "Warning: Quantity dropdown not found or not visible. Proceeding with default quantity.",
+          "warn",
+        );
+      }
+    }
+
+    log("Clicking 'Buy Now'...");
+    await page.click("#buy-now-button");
+    await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => { });
+
+    // ==========================================
+    // 3. CHECKOUT: ADDRESS SELECTION
+    // ==========================================
+    log("Step 3: Checking Address Selection...");
+    await humanDelay(4000, 6000);
+
+    const addressButton = page
+      .locator(
+        'input[data-testid="Address_select"], span:has-text("Deliver to this address") input, input[aria-labelledby="orderSummaryPrimaryActionBtn-announce"]',
+      )
+      .first();
+
+    if (
+      (await addressButton.count()) > 0 &&
+      (await addressButton.isVisible())
+    ) {
+      log("Clicking 'Deliver to this address'...");
+      await humanDelay(1500, 3000);
+
+      await addressButton.click();
+      await page.waitForLoadState("commit", { timeout: 60000 }).catch(() => { });
+    }
+
+    // ==========================================
+    // 4. CHECKOUT: DYNAMIC PAYMENT SELECTION
+    // ==========================================
+    log(`Step 4: Handling Payment Selection for: ${config.paymentMethod}...`);
+    await humanDelay(3000, 5000);
+
+    await page.evaluate(() => window.scrollBy(0, 400));
+    await humanDelay(2000, 4000);
+
+    let paymentSelected = false;
+
+    if (config.paymentMethod === "UPI") {
+      const upiRadio = page
+        .locator('input[type="radio"][value*="UPI"]')
+        .first();
+      if ((await upiRadio.count()) > 0) {
+        await upiRadio.click({ force: true });
+        log("Selected UPI. Waiting for input field...");
+        await humanDelay(2500, 4500);
+
+        const upiInput = page
+          .locator('input[name*="addUpiVpa"], input[placeholder*="UPI"]')
+          .first();
+        if ((await upiInput.count()) > 0 && (await upiInput.isVisible())) {
+          log(`Entering UPI ID: ${config.upiId}`);
+          await upiInput.fill(config.upiId);
+          await humanDelay(2000, 4000);
+
+          const verifyBtn = page
+            .locator(
+              'input[name*="ValidateUpiId"], span:has-text("Verify") input, span:has-text("Verify")',
+            )
+            .first();
+          if ((await verifyBtn.count()) > 0) {
+            log("Verifying UPI ID...");
+            await verifyBtn.click();
+            await humanDelay(5000, 7000);
+          }
+        }
+        paymentSelected = true;
+      }
+    } else if (config.paymentMethod === "NETBANKING") {
+      const nbRadio = page
+        .locator('input[type="radio"][value*="NetBanking"]')
+        .first();
+      if ((await nbRadio.count()) > 0) {
+        await nbRadio.click({ force: true });
+        log(
+          "Selected Net Banking. Waiting for dropdown panel to animate open...",
+        );
+        await humanDelay(3000, 5000);
+
+        const bankDropdown = page
+          .locator('select[name="ppw-bankSelection_dropdown"]')
+          .first();
+
+        if ((await bankDropdown.count()) > 0) {
+          log(`Attempting to select Bank: ${config.bankName}`);
+          try {
+            await bankDropdown.selectOption(
+              { label: config.bankName },
+              { force: true, timeout: 5000 },
+            );
+          } catch (e) {
+            const dropdownTrigger = page.locator(".a-dropdown-prompt").first();
+            await dropdownTrigger.click({ force: true });
+            await humanDelay(1500, 3000);
+
+            const bankOption = page
+              .locator(`.a-popover-inner a:has-text("${config.bankName}")`)
+              .first();
+            await bankOption.click({ force: true });
+          }
+          await humanDelay(2000, 4000);
+        }
+        paymentSelected = true;
+      }
+    } else if (config.paymentMethod === "COD") {
+      const codRadio = page
+        .locator(
+          'input[type="radio"][value*="COD"], input[type="radio"][value*="Cash"]',
+        )
+        .first();
+      if ((await codRadio.count()) > 0) {
+        await codRadio.click({ force: true });
+        paymentSelected = true;
+      }
+    } else if (config.paymentMethod === "CARD") {
+      const cardRadio = page
+        .locator('input[type="radio"][value*="CreditCard"]')
+        .first();
+      if ((await cardRadio.count()) > 0) {
+        await cardRadio.click({ force: true });
+        paymentSelected = true;
+      }
+    }
+
+    if (paymentSelected) {
+      log("Payment method configured successfully.");
+      await humanDelay(2500, 4500);
+
+      const usePaymentBtn = page
+        .locator(
+          'input[name="ppw-widgetEvent:SetPaymentPlanSelectContinueEvent"], span:has-text("Use this payment method") input',
+        )
+        .first();
+      if (
+        (await usePaymentBtn.count()) > 0 &&
+        (await usePaymentBtn.isVisible())
+      ) {
+        await usePaymentBtn.click();
+        await page
+          .waitForLoadState("commit", { timeout: 60000 })
+          .catch(() => { });
+      }
+    }
+
+    // ==========================================
+    // 5. FINAL GRAND TOTAL & PLACE ORDER (WITH BANK GATEWAY INTERCEPT)
+    // ==========================================
+    log("Step 5: Verifying final Grand Total...");
+    await humanDelay(4000, 7000);
+
+    const totalLocator = page
+      .locator(".grand-total-price, #sc-subtotal-amount-buybox, span.payByLine")
+      .first();
+
+    if ((await totalLocator.count()) > 0) {
+      let grandTotal = parseFloat(
+        (await totalLocator.innerText()).replace(/[^\d.-]/g, ""),
+      );
+      if (grandTotal > parseFloat(config.maxCheckoutTotal)) {
+        log(
+          `Condition Failed: Grand Total (₹${grandTotal}) exceeds limit (₹${config.maxCheckoutTotal}).`,
+          "error",
+        );
+
+        try {
+          await db.collection("automations").doc(docId).collection(email).add({
+            status: "Failed - Total Exceeded Limit",
+            checkout_total: grandTotal,
+            created_at: new Date().toISOString(),
+          });
+        } catch (e) { }
+        return;
+      }
+    }
+
+    log("Locating final 'Place Your Order' button...");
+    const placeOrderBtn = page
+      .locator(
+        'input[name="placeYourOrder1"], #placeYourOrder, #submitOrderButtonId',
+      )
+      .first();
+
+    if ((await placeOrderBtn.count()) > 0) {
+      log("Clicking 'Place Your Order'...");
+      await humanDelay(2000, 4000);
+
+      await placeOrderBtn.click();
+      await humanDelay(3000, 5000);
+
+      if (config.paymentMethod === "NETBANKING") {
+        log("⚠️ ACTION REQUIRED: Bank Payment Gateway detected.", "warn");
+        log(
+          "Bot is PAUSED. Please complete the Net Banking payment manually. (60 seconds timeout)",
+          "warn",
+        );
+
+        // Resilient polling to wait for the user to return to Amazon
+        let timeElapsed = 0;
+        let paymentSuccess = false;
+        const maxWait = 60000; // Exact 60 Seconds
+
+        while (timeElapsed < maxWait) {
+          try {
+            const currentUrl = page.url().toLowerCase();
+            if (
+              currentUrl.includes("amazon.in") &&
+              (currentUrl.includes("thankyou") ||
+                currentUrl.includes("your-orders") ||
+                currentUrl.includes("order-details") ||
+                currentUrl.includes("buy/thankyou"))
+            ) {
+              paymentSuccess = true;
+              break;
+            }
+          } catch (err) {
+            // Ignore execution context errors during redirection
+          }
+          await page.waitForTimeout(5000); // Check every 5 seconds
+          timeElapsed += 5000;
+        }
+
+        if (!paymentSuccess) {
+          log(
+            "60 seconds limit reached on Payment Gateway. Proceeding to Orders page for verification...",
+            "warn",
+          );
+        } else {
+          log("Payment complete. Returned to Amazon.", "success");
+        }
+
+        await humanDelay(2000, 4000);
+      } else {
+        await page
+          .waitForLoadState("commit", { timeout: 60000 })
+          .catch(() => {});
+        log("Order sequence submitted!", "success");
+      }
+
+      // ==========================================
+      // STEP 6: FETCH DETAILED ORDER DATA & SUB-COLLECTION DB UPDATE (SINGLE PAGE LOAD)
+      // ==========================================
+      log("Step 6: Fetching Order Details from history...");
+      await humanDelay(3000, 5000);
+
+      // Sif tabhi navigate karein jab browser pehle se orders page par na ho
+      const currentUrl = page.url().toLowerCase();
+      if (!currentUrl.includes("your-orders/orders")) {
+        await page.goto("https://www.amazon.in/your-orders/orders", {
+          waitUntil: "commit",
+          timeout: 60000,
+        });
+        await humanDelay(3000, 5000);
+      }
+
+      const firstOrderCard = page
+        .locator(".order-card, .js-order-card, .yohtmlc-order-card, .a-box-group")
+        .first();
+      let orderBlockText = "";
+
+      if ((await firstOrderCard.count()) > 0) {
+        orderBlockText = await firstOrderCard.innerText();
+      } else {
+        orderBlockText = await page.innerText("body");
+      }
+
+      const orderIdMatch = orderBlockText.match(/\d{3}-\d{7}-\d{7}/);
+      const orderId = orderIdMatch ? orderIdMatch[0] : "Not Found";
+
+      const titleLocator = page
+        .locator(
+          ".yohtmlc-product-title, .a-link-normal, .a-link-normal.yohtmlc-item-title, .a-link-normal:has(.a-text-bold)",
+        )
+        .first();
+      let productName = "Unknown Product";
+      if ((await titleLocator.count()) > 0) {
+        productName = (await titleLocator.innerText()).trim();
+      }
+
+      const orderTotalLocator = page
+        .locator(".yohtmlc-order-total, .a-color-price, .value")
+        .first();
+      let orderPrice = "Unknown Price";
+      if ((await orderTotalLocator.count()) > 0) {
+        orderPrice = (await orderTotalLocator.innerText()).trim();
+      }
+
+      let orderStatus = "Success";
+      const blockTextLower = orderBlockText.toLowerCase();
+
+      if (
+        blockTextLower.includes("payment failed") ||
+        blockTextLower.includes("attention is required") ||
+        blockTextLower.includes("action required") ||
+        blockTextLower.includes("revise payment") ||
+        blockTextLower.includes("cancelled")
+      ) {
+        orderStatus = "Failed";
+      }
+
+      log(
+        `Order Details Captured -> ID: ${orderId} | Status: ${orderStatus} | Price: ${orderPrice}`,
+      );
+
+      try {
+        await db.collection("automations").doc(docId).collection(email).add({
+          order_id: orderId,
+          product_name: productName,
+          order_price: orderPrice,
+          status: orderStatus,
+          created_at: new Date().toISOString(),
+        });
+
+        await db.collection("automations").doc(docId).update({
+          last_activity: new Date().toISOString(),
+        });
+
+        log(
+          `Database sub-collection '${email}' successfully updated with order details.`,
+          "success",
+        );
+      } catch (e) {
+        log(
+          "Warning: Could not save final details to database (Network Timeout).",
+          "warn",
+        );
+      }
+
+      keepOpenForUser = true;
+    } else {
+      throw new Error(
+        "Could not locate the 'Place Order' button on the final page.",
+      );
+    }
+
   } catch (error) {
     log(`ERROR: Sequence interrupted: ${error.message}`, "error");
     if (docId) {
@@ -602,11 +1027,16 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       await context.close();
     } else if (keepOpenForUser) {
       log(
+
         "All configured orders finished! Automation bot detached.",
+        "Automation bot detached. The browser tab will remain open for your manual review.",
         "success",
       );
     }
   }
 }
+
+
+module.exports = { runAutomatonWorker };
 
 module.exports = { runAutomatonWorker };
