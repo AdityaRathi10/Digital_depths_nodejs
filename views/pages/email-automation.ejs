@@ -1,0 +1,98 @@
+<style>
+  /* Basic styling for the log box at the bottom */
+  #email-log-console {
+      margin-top: 20px;
+      padding: 15px;
+      background: #fff;
+      color: green;
+      height: 200px;
+      overflow-y: auto;
+      font-family: monospace;
+      border-radius: 5px;
+  }
+  .log-error { color: #ff4c4c; }
+  .log-success { color: #00d4ff; }
+  .log-info { color: #1e1e1e; }
+</style>
+
+<div class="w-full max-w-4xl mx-auto mt-8 p-6 bg-gray-50 rounded-lg">
+  <form id="email-save-form" class="flex items-center w-full">
+    <!-- Input Group -->
+    <div
+      class="p-6 border border-gray-200 rounded-md bg-white shadow-sm overflow-hidden w-3xl"
+    >
+      <div class="flex items-center gap-4 mb-4">
+        <input
+          type="email"
+          name="accountEmail"
+          id="accountEmail"
+          placeholder="Enter Email Address"
+          class="w-full border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-gray-300"
+        />
+        <input
+          type="password"
+          name="accountPassword"
+          id="accountPassword"
+          name="password"
+          placeholder="Enter Password"
+          class="w-full border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 placeholder-gray-300"
+        />
+      </div>
+      <div class="flex justify-end">
+        <!-- Submit Button -->
+        <button
+          type="submit"
+          class="px-8 py-3 bg-[#1e3a8a] hover:bg-[#172b6b] text-white font-medium rounded-md shadow-sm transition-colors"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<!-- Real-time Log Output Area -->
+<div id="email-log-console"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  const logConsole = document.getElementById('email-log-console');
+
+  // 1. Listen for logs coming BACK from the server
+  socket.on('log', (data) => {
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-${data.type}`;
+
+    const timestamp = new Date().toLocaleTimeString();
+    logEntry.innerText = `[${timestamp}] ${data.msg}`;
+
+    logConsole.appendChild(logEntry);
+
+    // Auto-scroll to the bottom of the log window
+    logConsole.scrollTop = logConsole.scrollHeight;
+  });
+
+  document.getElementById('email-save-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+
+    // Grab the text from the input fields
+    const email = document.getElementById('accountEmail').value.trim();
+    const password = document.getElementById('accountPassword').value.trim();
+
+    // Validate inputs
+    if (!email || !password) {
+      alert("Please enter both Email and Password before proceeding.");
+      return;
+    }
+
+    // Clear the log box for a fresh run
+    if (logConsole) {
+      logConsole.innerHTML = '';
+    }
+
+    // Send the data TO the server matching the exact event name in Step 2
+    console.log("Sending data to server...");
+    socket.emit('start-account-setup', { email: email, password: password });
+  });
+</script>

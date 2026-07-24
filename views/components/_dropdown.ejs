@@ -1,0 +1,97 @@
+<% const id=locals.id || 'dropdown-' + Math.random().toString(36).substring(2, 9); const align=locals.align || 'right' ;
+    const alignClass=align==='right' ? 'right-0 origin-top-right' : 'left-0 origin-top-left' ; %>
+    <div class="relative inline-block text-left dropdown-container" id="<%= id %>">
+        <!-- Trigger -->
+        <button type="button"
+            class="dropdown-button inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-gray-200 bg-white hover:bg-gray-100 hover:text-gray-900 h-10 px-4 py-2 shadow-sm"
+            aria-expanded="false" aria-haspopup="true">
+            <%- locals.label || locals.el || 'Options' %>
+                <svg class="ml-2 -mr-1 h-4 w-4 opacity-50" xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <path d="m6 9 6 6 6-6" />
+                </svg>
+        </button>
+
+        <!-- Menu Content -->
+        <div class="dropdown-menu absolute <%= alignClass %> z-50 mt-2 min-w-[8rem] w-56 rounded-md border border-gray-200 bg-white p-1 text-gray-950 shadow-md opacity-0 invisible scale-95 transition-all duration-200 ease-in-out focus:outline-none"
+            role="menu" aria-orientation="vertical" tabindex="-1">
+            <% if (locals.items && locals.items.length> 0) { %>
+                <% items.forEach(function(item) { %>
+                    <% if (item.divider) { %>
+                        <div class="h-px bg-gray-200 my-1 -mx-1"></div>
+                        <% } else if (item.header) { %>
+                            <div class="px-2 py-1.5 text-sm font-semibold text-gray-900">
+                                <%- item.label %>
+                            </div>
+                            <% } else { %>
+                                <% const Tag = item.href ? 'a' : 'button'; %>
+                                <% const hrefAttr = item.href ? `href="${item.href}"` : 'type="button"'; %>
+                                <<%= Tag %> <%- hrefAttr %>
+                                    class="w-full text-left relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-gray-100 hover:text-gray-900 focus:bg-gray-100 focus:text-gray-900 <%= item.disabled ? 'pointer-events-none opacity-50' : '' %>"
+                                    role="menuitem" tabindex="-1">
+                                    <% if (item.icon) { %>
+                                        <span class="mr-2 h-4 w-4 flex items-center justify-center"><%- item.icon
+                                                %></span>
+                                        <% } %>
+                                            <%- item.label %>
+                                </<%= Tag %>>
+                                <% } %>
+                                    <% }); %>
+                                        <% } else { %>
+                                            <div class="px-2 py-1.5 text-sm text-gray-500">No items</div>
+                                            <% } %>
+        </div>
+    </div>
+
+    <script>
+        if (!window.__dropdownInitialized) {
+            window.__dropdownInitialized = true;
+
+            document.addEventListener('click', (e) => {
+                const isDropdownButton = e.target.closest('.dropdown-button');
+
+                document.querySelectorAll('.dropdown-container').forEach(container => {
+                    const btn = container.querySelector('.dropdown-button');
+                    const menu = container.querySelector('.dropdown-menu');
+
+                    if (!btn || !menu) return;
+
+                    // If clicked on this dropdown's button, toggle it
+                    if (isDropdownButton && container.contains(e.target)) {
+                        const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+                        btn.setAttribute('aria-expanded', !isExpanded);
+
+                        if (!isExpanded) {
+                            menu.classList.remove('opacity-0', 'invisible', 'scale-95');
+                            menu.classList.add('opacity-100', 'visible', 'scale-100');
+                        } else {
+                            menu.classList.add('opacity-0', 'invisible', 'scale-95');
+                            menu.classList.remove('opacity-100', 'visible', 'scale-100');
+                        }
+                    }
+                    // If clicked outside the container, close it
+                    else if (!container.contains(e.target)) {
+                        btn.setAttribute('aria-expanded', 'false');
+                        menu.classList.add('opacity-0', 'invisible', 'scale-95');
+                        menu.classList.remove('opacity-100', 'visible', 'scale-100');
+                    }
+                });
+            });
+
+            // Close on Escape key
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    document.querySelectorAll('.dropdown-container').forEach(container => {
+                        const btn = container.querySelector('.dropdown-button');
+                        const menu = container.querySelector('.dropdown-menu');
+                        if (btn) btn.setAttribute('aria-expanded', 'false');
+                        if (menu) {
+                            menu.classList.add('opacity-0', 'invisible', 'scale-95');
+                            menu.classList.remove('opacity-100', 'visible', 'scale-100');
+                        }
+                    });
+                }
+            });
+        }
+    </script>

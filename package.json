@@ -1,0 +1,50 @@
+{
+  "name": "digital_depths",
+  "version": "1.0.0",
+  "description": "",
+  "main": "app.js",
+  "bin": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node app.js",
+    "dev:server": "nodemon app.js",
+    "dev:css": "tailwindcss -i ./public/css/input.css -o ./public/css/style.css --watch",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:css\"",
+    "build:css": "tailwindcss -i ./public/css/input.css -o ./public/css/style.css",
+    "build": "pkg . --targets node18-win-x64 --output AmazonBot.exe"
+  },
+  "author": "Aditya Rathi",
+  "license": "ISC",
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.4.2",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1",
+    "express-ejs-layouts": "^2.5.1",
+    "firebase": "^12.16.0",
+    "firebase-admin": "^14.2.0",
+    "nodemon": "^3.1.14",
+    "playwright": "^1.61.1",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "concurrently": "^10.0.3",
+    "esbuild": "^0.28.1",
+    "pkg": "^5.8.1",
+    "tailwindcss": "^4.3.3"
+  },
+  "pkg": {
+    "scripts": [
+      "node_modules/firebase-admin/**/*.js",
+      "node_modules/playwright/**/*.js",
+      "node_modules/playwright-core/**/*.js",
+      "node_modules/chromium-bidi/**/*.js"
+    ],
+    "assets": [
+      "views/**/*",
+      "public/**/*",
+      "config/**/*"
+    ]
+  }
+}
