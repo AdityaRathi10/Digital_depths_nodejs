@@ -96,3 +96,4 @@ Thumbs.db
 
 # Firebase key and configs
 config/
+*.exe
