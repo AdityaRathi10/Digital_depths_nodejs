@@ -391,9 +391,6 @@
   .max-h-90 {
     max-height: calc(var(--spacing) * 90);
   }
-  .max-h-96 {
-    max-height: calc(var(--spacing) * 96);
-  }
   .min-h-screen {
     min-height: 100vh;
   }
@@ -1033,6 +1030,9 @@
   }
   .disabled\:pointer-events-none:disabled {
     pointer-events: none;
+  }
+  .disabled\:cursor-not-allowed:disabled {
+    cursor: not-allowed;
   }
   .disabled\:opacity-50:disabled {
     opacity: 50%;

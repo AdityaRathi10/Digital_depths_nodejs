@@ -20,84 +20,53 @@
             </h2> -->
             <p class="text-gray-400 text-sm">Real-time Amazon Purchase Sync</p>
           </div>
+          <div>
+            <button id="downloadOrdersBtn" disabled
+              class="bg-blue-800 hover:bg-blue-900 text-white text-sm font-semibold py-2 px-4 rounded-md shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              onclick="exportToExcel()">
+              Download Orders in Excel
+            </button>
+          </div>
         </div>
 
         <!-- Orders Dashboard Card -->
-        <div
-          class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 w-full"
-        >
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 w-full">
           <!-- Table Wrapper (Handles both X and Y scrolling) -->
           <div class="max-h-90 overflow-auto border border-gray-100 rounded-lg">
             <table class="w-full text-sm text-left">
-              <thead
-                class="text-xs text-gray-500 uppercase bg-gray-50 sticky top-0 z-10 shadow-sm"
-              >
+              <thead class="text-xs text-gray-500 uppercase bg-gray-50 sticky top-0 z-10 shadow-sm">
                 <tr>
-                  <th
-                    scope="col"
-                    class="px-6 py-4 font-semibold tracking-wider"
-                  >
+                  <th scope="col" class="px-6 py-4 font-semibold tracking-wider">
                     Order ID
                   </th>
-                  <th
-                    scope="col"
-                    class="px-6 py-4 font-semibold tracking-wider"
-                  >
+                  <th scope="col" class="px-6 py-4 font-semibold tracking-wider">
                     Product Details
                   </th>
-                  <th
-                    scope="col"
-                    class="px-6 py-4 font-semibold tracking-wider"
-                  >
+                  <th scope="col" class="px-6 py-4 font-semibold tracking-wider">
                     Customer
                   </th>
-                  <th
-                    scope="col"
-                    class="px-6 py-4 font-semibold tracking-wider"
-                  >
+                  <th scope="col" class="px-6 py-4 font-semibold tracking-wider">
                     Total Price
                   </th>
-                  <th
-                    scope="col"
-                    class="px-6 py-4 font-semibold tracking-wider text-right"
-                  >
+                  <th scope="col" class="px-6 py-4 font-semibold tracking-wider text-right">
                     Status
                   </th>
                 </tr>
               </thead>
-              <tbody
-                id="ordersListContainer"
-                class="bg-white divide-y divide-gray-100"
-              >
+              <tbody id="ordersListContainer" class="bg-white divide-y divide-gray-100">
                 <!-- Default Loading State -->
                 <tr>
                   <td colspan="5" class="px-6 py-10 text-center">
-                    <div
-                      class="flex justify-center items-center space-x-3 text-gray-500"
-                    >
-                      <svg
-                        class="animate-spin h-6 w-6 text-indigo-400"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          class="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          stroke-width="4"
-                        ></circle>
-                        <path
-                          class="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        ></path>
+                    <div class="flex justify-center items-center space-x-3 text-gray-500">
+                      <svg class="animate-spin h-6 w-6 text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none"
+                        viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                        </path>
                       </svg>
-                      <span class="text-sm"
-                        >Awaiting active transaction push...</span
-                      >
+                      <span class="text-sm">Awaiting active transaction push...</span>
                     </div>
                   </td>
                 </tr>
@@ -109,9 +78,7 @@
     </div>
     <div class="basis-1/3">
       <!-- Dashboard Card -->
-      <div
-        class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 min-w-md"
-      >
+      <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 min-w-md">
         <!-- Card Header -->
         <div class="flex justify-between items-start mb-8">
           <div>
@@ -122,31 +89,15 @@
         </div>
 
         <!-- Dynamic List Container -->
-        <div
-          id="queueListContainer"
-          class="space-y-3 max-h-80 overflow-y-auto pr-2"
-        >
+        <div id="queueListContainer" class="space-y-3 max-h-80 overflow-y-auto pr-2">
           <!-- Default Loading State -->
           <div class="flex items-center space-x-3 text-gray-500 py-4">
-            <svg
-              class="animate-spin h-5 w-5 text-blue-600"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                class="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                stroke-width="4"
-              ></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
+            <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none"
+              viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+              </path>
             </svg>
             <span class="text-sm">Awaiting active transaction push...</span>
           </div>
@@ -155,6 +106,9 @@
     </div>
   </div>
 </div>
+
+<!-- Import SheetJS for Excel export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <!-- Import Socket.io -->
 <script src="/socket.io/socket.io.js"></script>
@@ -308,6 +262,7 @@
           `;
           container.appendChild(row);
         });
+        document.getElementById('downloadOrdersBtn').disabled = false;
       } else {
         container.innerHTML = `
           <tr>
@@ -321,6 +276,36 @@
       container.innerHTML = `<div class="text-red-400 text-sm text-center py-8">Failed to sync orders.</div>`;
     }
   }
+
+
+  async function exportToExcel(ordersArray) {
+    const response = await fetch('/api/orders');
+    const data = await response.json();
+
+    if (data.success && data.orders.length > 0) {
+      // 1. Map your data to ensure the Excel columns look clean
+      const cleanData = data.orders.map(order => ({
+        "Order ID": order.orderId || "N/A",
+        "Product Name": order.productName || "N/A",
+        "Email": order.email || "N/A",
+        "Price": order.price || "0",
+        "Status": order.status || "Pending"
+      }));
+
+      // 2. Convert the JSON array to an Excel worksheet
+      const worksheet = XLSX.utils.json_to_sheet(cleanData);
+
+      // 3. Create a new Excel workbook and append the worksheet
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Orders Data");
+
+      // 4. Trigger the download!
+      XLSX.writeFile(workbook, "DigitalDepths_Orders.xlsx");
+    } else {
+      alert("No orders available to export.");
+    }
+  }
+
 
   // Auto-load orders and set interval for sync
   window.addEventListener('DOMContentLoaded', () => {
