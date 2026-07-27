@@ -283,8 +283,6 @@
           upiId: document.getElementById('upiId') ? document.getElementById('upiId').value : ''
       };
 
-      console.log("Config gathered:", config);
-
       // Basic validation
       if(!config.emails || !config.productLink || !config.maxPrice || !config.maxCheckoutTotal) {
           alert("Emails, Product link, Max Product Price Limit, and Max Checkout Total are required.");

@@ -14,6 +14,9 @@ const { runAutomatonWorker } = require("./helpers/runAutomateWroker.js");
 const { exec } = require("child_process");
 const { runAccountSetupWorker } = require("./helpers/accountWorker.js");
 const apiRoute = require("./routes/api/api.route.js");
+const {
+  fetchCardDetailsWorker,
+} = require("./helpers/fetchCardDetailsWorker.js");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -167,6 +170,59 @@ io.on("connection", (socket) => {
       // Call the existing worker function
       await runAccountSetupWorker(browser, email, password, socket, db);
     } catch (error) {
+      socket.emit("log", {
+        type: "error",
+        msg: `System Error: ${error.message}`,
+      });
+    }
+  });
+
+  socket.on("trigger-get-card-details", async (data) => {
+    const { email, targetMonth } = data;
+
+    if (!email || !targetMonth) {
+      socket.emit("log", {
+        type: "error",
+        msg: "Email and Month are required.",
+      });
+      return;
+    }
+
+    socket.emit("log", {
+      type: "info",
+      msg: `Initiating sign-in process for database account: ${email}`,
+    });
+
+    try {
+      // Fetch the specific password for this email from DB
+      const snapshot = await db
+        .collection("automations")
+        .where("email", "==", email)
+        .limit(1)
+        .get();
+
+      if (snapshot.empty || !snapshot.docs[0].data().password) {
+        socket.emit("log", {
+          type: "error",
+          msg: `Error: Password not found in database for ${email}.`,
+        });
+        return;
+      }
+
+      const password = snapshot.docs[0].data().password;
+
+      // Launch Browser
+      const browser = await chromium.launch({
+        headless: false,
+        channel: "chrome",
+        args: ["--start-maximized", "--disable-dev-shm-usage", "--no-sandbox"],
+      });
+
+      // Call the existing worker function
+      await fetchCardDetailsWorker(browser, email, targetMonth, socket, db);
+      await browser.close(); // Close the browser after fetching card details
+    } catch (error) {
+      console.error("Error in trigger-get-card-details:", error);
       socket.emit("log", {
         type: "error",
         msg: `System Error: ${error.message}`,
