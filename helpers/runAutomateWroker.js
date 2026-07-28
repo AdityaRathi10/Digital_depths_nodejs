@@ -167,9 +167,8 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
       while (itemCount > 0) {
         await deleteLocators.first().click();
-        await humanDelay(2000, 4000); // Give Amazon's DOM time to update dynamically
+        await humanDelay(2000, 4000);
 
-        // Re-evaluate the locator to find remaining items
         deleteLocators = page.locator(
           'input[value="Delete"], .sc-action-delete input',
         );
@@ -196,7 +195,6 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
       );
       log(`----------------------------------------`);
 
-      // We will store the captured product name here for the whole loop cycle
       let capturedProductName = "Unknown Product";
 
       try {
@@ -210,7 +208,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         });
         await humanDelay(3000, 6000);
 
-        // --- NEW: CAPTURE PRODUCT TITLE FROM DETAIL PAGE ---
+        // Capture Product Title
         try {
           const titleElement = page.locator("#productTitle").first();
           if ((await titleElement.count()) > 0) {
@@ -226,33 +224,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           log("Warning: Failed to extract product title.", "warn");
         }
 
-        const priceBoxLocator = page.locator(".a-price-whole").first();
-        if ((await priceBoxLocator.count()) > 0) {
-          let currentPrice = parseFloat(
-            (await priceBoxLocator.innerText()).replace(/,/g, ""),
-          );
-          if (currentPrice > parseFloat(config.maxPrice)) {
-            log(
-              `Condition Failed [Order ${orderIndex}]: Price (₹${currentPrice}) exceeds Max Limit (₹${config.maxPrice}). Skipping this order.`,
-              "error",
-            );
-            await db
-              .collection("automations")
-              .doc(docId)
-              .collection(email)
-              .add({
-                order_number: orderIndex,
-                status: "Failed - Price Exceeded Limit",
-                product_link: config.productLink,
-                price_found: currentPrice,
-                created_at: new Date().toISOString(),
-              });
-            continue; // Proceed to next order
-          }
-          log(`Price verified: ₹${currentPrice}`);
-        }
-
-        // --- QUANTITY SELECTION (Handles both Dropdowns & Input Fields) ---
+        // --- QUANTITY SELECTION ---
         if (parseInt(config.quantity) > 1) {
           log(`Adjusting quantity to ${config.quantity}...`);
           await humanDelay(3500, 5500);
@@ -285,10 +257,8 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
               await qtyInput.fill(config.quantity.toString());
               await humanDelay(1000, 2000);
 
-              // Press Enter to submit the input (handles both page reload and AJAX updates)
               await qtyInput.press("Enter");
 
-              // Safely wait for potential page reload without crashing if it doesn't reload
               await page
                 .waitForLoadState("domcontentloaded", { timeout: 5000 })
                 .catch(() => {});
@@ -379,7 +349,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
             } catch (e) {}
 
             keepOpenForUser = true;
-            continue; // Skip the rest of the checkout process for this order and jump to the next one (if any)
+            continue;
           } else {
             throw new Error(
               "Neither 'Buy Now' nor 'Add to Cart' buttons were available or working.",
@@ -529,25 +499,43 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
           }
         }
 
-        // --- FINAL GRAND TOTAL & PLACE ORDER ---
+        // =========================================================
+        // --- FINAL GRAND TOTAL VALIDATION (MIN & MAX AMOUNT) ---
+        // =========================================================
         log(
-          `[Order ${orderIndex}/${totalOrders}] Verifying final Grand Total...`,
+          `[Order ${orderIndex}/${totalOrders}] Verifying final Grand Total against limits...`,
         );
         await humanDelay(4000, 7000);
 
+        // Updated locator targeting the exact DOM structure from your image
         const totalLocator = page
           .locator(
-            ".grand-total-price, #sc-subtotal-amount-buybox, span.payByLine",
+            'span[data-shimmer-target="ordertotals-amount"], .grand-total-price, #sc-subtotal-amount-buybox, span.payByLine, .order-summary-line-definition span',
           )
           .first();
 
         if ((await totalLocator.count()) > 0) {
-          let grandTotal = parseFloat(
-            (await totalLocator.innerText()).replace(/[^\d.-]/g, ""),
+          const rawTotalText = await totalLocator.innerText();
+          const grandTotal = parseFloat(
+            rawTotalText.replace(/[^\d.-]/g, ""),
           );
-          if (grandTotal > parseFloat(config.maxCheckoutTotal)) {
+
+          // Support both naming conventions (minCheckoutTotal / minPrice & maxCheckoutTotal / maxPrice)
+          const minLimit = parseFloat(
+            config.minCheckoutTotal ?? config.minAmount ?? config.minPrice ?? 0,
+          );
+          const maxLimit = parseFloat(
+            config.maxCheckoutTotal ?? config.maxAmount ?? config.maxPrice ?? Number.MAX_VALUE,
+          );
+
+          log(
+            `Extracted Final Grand Total: ₹${grandTotal} (Allowed Range: ₹${minLimit} - ₹${maxLimit})`,
+          );
+
+          // Check both Min and Max limits
+          if (grandTotal < minLimit || grandTotal > maxLimit) {
             log(
-              `Condition Failed [Order ${orderIndex}]: Grand Total (₹${grandTotal}) exceeds limit (₹${config.maxCheckoutTotal}).`,
+              `Condition Failed [Order ${orderIndex}]: Grand Total (₹${grandTotal}) is outside required range (₹${minLimit} - ₹${maxLimit}). Skipping order!`,
               "error",
             );
 
@@ -557,14 +545,30 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
               .collection(email)
               .add({
                 order_number: orderIndex,
-                status: "Failed - Total Exceeded Limit",
+                status: "Failed - Total Amount Outside Allowed Range",
                 checkout_total: grandTotal,
+                min_limit: minLimit,
+                max_limit: maxLimit,
+                product_link: config.productLink,
                 created_at: new Date().toISOString(),
               });
-            continue; // Proceed to next order
+
+            keepOpenForUser = true;
+            continue; // Skip placing this order and move to next
           }
+
+          log(
+            `Grand Total ₹${grandTotal} verified successfully within allowed bounds (₹${minLimit} - ₹${maxLimit}).`,
+            "success",
+          );
+        } else {
+          log(
+            "Warning: Grand Total price element not found on review page. Proceeding with caution...",
+            "warn",
+          );
         }
 
+        // --- PLACE ORDER ---
         log("Locating final 'Place Your Order' button...");
         const placeOrderBtn = page
           .locator(
@@ -619,7 +623,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
             let timeElapsed = 0;
             let paymentSuccess = false;
-            const maxWait = 5000;
+            const maxWait = 60000;
 
             while (timeElapsed < maxWait) {
               try {
@@ -721,7 +725,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
               .add({
                 order_number: orderIndex,
                 order_id: orderId,
-                product_name: capturedProductName, // <--- Using the variable we saved earlier
+                product_name: capturedProductName,
                 order_price: orderPrice,
                 status: orderStatus,
                 created_at: new Date().toISOString(),
@@ -748,7 +752,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
         }
       } catch (orderError) {
         log(`ERROR on Order #${orderIndex}: ${orderError.message}`, "error");
-        keepOpenForUser = true; // Ensure browser stays open on catastrophic failure
+        keepOpenForUser = true;
 
         if (docId) {
           try {
@@ -758,7 +762,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
               .collection("orders")
               .add({
                 order_number: orderIndex,
-                product_name: capturedProductName, // <--- Saving it even on error if it was grabbed
+                product_name: capturedProductName,
                 status: "Failed - Execution Error",
                 error_message: orderError.message,
                 created_at: new Date().toISOString(),
