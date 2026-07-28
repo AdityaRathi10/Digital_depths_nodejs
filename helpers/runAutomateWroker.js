@@ -190,39 +190,49 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
     for (let orderIndex = 1; orderIndex <= totalOrders; orderIndex++) {
       log(`----------------------------------------`);
+log(
+  `📦 Processing Order ${orderIndex} of ${totalOrders} [Current Tab]...`,
+);
+log(`----------------------------------------`);
+
+let capturedProductName = "Unknown Product";
+
+try {
+  // --- CLEAN ASIN LINK & FAST NAVIGATION ---
+  // Tracking parameters remove karke direct link banata hai (fast redirection)
+  const asinMatch = config.productLink.match(/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
+  const cleanProductUrl = asinMatch ? `https://www.amazon.in/dp/${asinMatch[1]}` : config.productLink;
+
+  log(
+    `[Order ${orderIndex}/${totalOrders}] Fast navigating to: ${cleanProductUrl}`,
+  );
+
+  // waitUntil: "domcontentloaded" -> Page DOM ready hote hi aage badhega
+  await page.goto(cleanProductUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: 30000,
+  });
+
+  // Dynamic Wait: Fixed 3-6s delay ki jagah element ready hote hi instantly trigger hoga
+  await page
+    .waitForSelector("#productTitle, #buy-now-button", { timeout: 8000 })
+    .catch(() => {});
+
+  // Capture Product Title
+  try {
+    const titleElement = page.locator("#productTitle").first();
+    if ((await titleElement.count()) > 0) {
+      capturedProductName = (await titleElement.innerText()).trim();
       log(
-        `📦 Processing Order ${orderIndex} of ${totalOrders} [Current Tab]...`,
+        `Captured Product Title: ${capturedProductName.substring(0, 40)}...`,
+        "success",
       );
-      log(`----------------------------------------`);
-
-      let capturedProductName = "Unknown Product";
-
-      try {
-        // --- PRODUCT PAGE & BUY NOW ---
-        log(
-          `[Order ${orderIndex}/${totalOrders}] Navigating to product page...`,
-        );
-        await page.goto(config.productLink, {
-          waitUntil: "commit",
-          timeout: 60000,
-        });
-        await humanDelay(3000, 6000);
-
-        // Capture Product Title
-        try {
-          const titleElement = page.locator("#productTitle").first();
-          if ((await titleElement.count()) > 0) {
-            capturedProductName = (await titleElement.innerText()).trim();
-            log(
-              `Captured Product Title: ${capturedProductName.substring(0, 40)}...`,
-              "success",
-            );
-          } else {
-            log("Warning: #productTitle not found on product page.", "warn");
-          }
-        } catch (titleErr) {
-          log("Warning: Failed to extract product title.", "warn");
-        }
+    } else {
+      log("Warning: #productTitle not found on product page.", "warn");
+    }
+  } catch (titleErr) {
+    log("Warning: Failed to extract product title.", "warn");
+  }
 
         // --- QUANTITY SELECTION ---
         if (parseInt(config.quantity) > 1) {
