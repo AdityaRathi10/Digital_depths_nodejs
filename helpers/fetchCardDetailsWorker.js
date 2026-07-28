@@ -127,7 +127,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     }
 
     // ==========================================
-    // 2. NAVIGATE TO STATEMENTS & APPLY FILTER
+    // 2. NAVIGATE TO STATEMENTS & APPLY FILTERS
     // ==========================================
     log("Navigating to Amazon Payment Statements...");
     await page.goto("https://www.amazon.in/gp/payment/statement", {
@@ -136,19 +136,43 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     });
     await humanDelay(4000, 6000);
 
-    // Get current year to dynamically match the UI
+    // Apply Payment Mode Filter
+    log("Applying 'Credit/Debit Card' filter...");
+    const cardFilterRadio = page
+      .locator(`tux-text:has-text("Credit/Debit Card")`)
+      .first();
+    if (
+      (await cardFilterRadio.count()) > 0 &&
+      (await cardFilterRadio.isVisible())
+    ) {
+      await cardFilterRadio.click();
+      log(
+        `Payment mode filter applied. Waiting for table refresh...`,
+        "success",
+      );
+      await humanDelay(3000, 5000);
+    } else {
+      log(
+        `Warning: 'Credit/Debit Card' filter not found. Proceeding anyway.`,
+        "warn",
+      );
+    }
+
+    // Apply Time Period Filter
     const currentYear = new Date().getFullYear();
     const timePeriodLabel = `${targetMonth} ${currentYear}`;
 
     log(`Applying time period filter for: ${timePeriodLabel}...`);
-
     const filterRadio = page
       .locator(`tux-text:has-text("${timePeriodLabel}")`)
       .first();
 
     if ((await filterRadio.count()) > 0 && (await filterRadio.isVisible())) {
       await filterRadio.click();
-      log(`Filter applied. Waiting for transactions to load...`, "success");
+      log(
+        `Time filter applied. Waiting for transactions to load...`,
+        "success",
+      );
       await humanDelay(4000, 7000);
     } else {
       log(
@@ -168,80 +192,136 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     let foundCardsCount = 0;
 
     while (hasMoreTransactions) {
-      // DYNAMIC LOCATOR: Evaluated fresh every loop to prevent Stale Element Reference crashes
-      // Targeting the specific shadow DOM elements from your provided image
+      // Re-evaluate list dynamically to avoid Stale Element Reference errors
       const transactionRows = page.locator(
-        "payui-transaction-history-list-view .default-theme .transaction-item .tux-cursor-pointer",
+        "payui-transaction-history-list-view .default-theme .transaction-item",
       );
-
-      // Wait for at least one row to appear in case the page is slow to re-render after going back
-      await transactionRows
-        .first()
-        .waitFor({ state: "attached", timeout: 15000 })
-        .catch(() => {});
-
       const totalRows = await transactionRows.count();
 
-      if (currentIndex >= totalRows || totalRows === 0) {
+      if (currentIndex >= totalRows) {
         hasMoreTransactions = false;
         break;
       }
 
       log(`Opening transaction ${currentIndex + 1} of ${totalRows}...`);
 
-      const currentRow = transactionRows.nth(currentIndex);
+      const clickableRow = transactionRows
+        .nth(currentIndex)
+        .locator(".tux-cursor-pointer")
+        .first();
+      await clickableRow.click();
 
-      // Ensure the bot scrolls to the element before clicking, vital for long transaction lists
-      await currentRow.scrollIntoViewIfNeeded();
-      await humanDelay(1000, 2000);
-      await currentRow.click();
-
-      // Wait for the detail page to load completely
       await page.waitForLoadState("domcontentloaded").catch(() => {});
       await humanDelay(3000, 5000);
 
       // ==========================================
-      // 4. EXTRACT CARD DETAILS
+      // 4. EXTRACT DETAILED TRANSACTION DATA
       // ==========================================
-      const pageText = await page.innerText("body");
-      const cardMatch = pageText.match(
-        /(?:Visa|MasterCard|RuPay|Credit Card|Debit Card|Card).*?(?:ending in|ending with|\*\*)\s*(\d{4})/i,
-      );
+      log("Extracting transaction data points...");
 
-      if (cardMatch) {
-        const cardString = cardMatch[0].trim();
-        log(`💳 Found Card Details: ${cardString}`, "success");
+      // 4a. Status
+      const tStatus = await page
+        .locator(
+          "payment-status-header .payment-status-bubble-wrapper tux-text",
+        )
+        .first()
+        .innerText({ timeout: 3000 })
+        .catch(() => "Unknown Status");
 
-        try {
-          await db.collection("automations").doc(docId).collection(email).add({
-            type: "Extracted Card",
-            card_details: cardString,
-            statement_month: timePeriodLabel,
-            created_at: new Date().toISOString(),
-          });
-          foundCardsCount++;
-        } catch (e) {
-          log("Warning: Failed to save card details to database.", "warn");
-        }
+      // 4b. Amount
+      const tAmount = await page
+        .locator("payment-status-header .tux-flex-row tux-text")
+        .first()
+        .innerText({ timeout: 3000 })
+        .catch(() => "Unknown Amount");
+
+      // 4c. Product Name
+      const tProduct = await page
+        .locator('div[part="title"] span, .title-below span')
+        .first()
+        .innerText({ timeout: 3000 })
+        .catch(() => "Unknown Product");
+
+      // 4d. Card Details
+      let tCard = "Unknown Card";
+      const cardEl = page
+        .locator('payment-method-entity tux-text:has-text("**")')
+        .first();
+      if ((await cardEl.count()) > 0) {
+        tCard = await cardEl
+          .innerText({ timeout: 3000 })
+          .catch(() => "Unknown Card");
       } else {
-        log(`No card details found on transaction ${currentIndex + 1}.`);
+        // Regex Fallback
+        const pageText = await page.innerText("body").catch(() => "");
+        const cardMatch = pageText.match(
+          /(?:Visa|MasterCard|RuPay|Credit Card|Debit Card|Card).*?(?:ending in|ending with|\*\*)\s*(\d{4})/i,
+        );
+        if (cardMatch) tCard = cardMatch[0].trim();
       }
 
+      // 4e. Order IDs (Multiple)
+      const tOrderIdsRaw = await page
+        .locator("payui-identifiers-entity tux-link")
+        .allInnerTexts()
+        .catch(() => []);
+      const tOrderIds = tOrderIdsRaw
+        .map((id) => id.replace(/,/g, "").trim())
+        .filter((id) => id);
+
+      // 4f. Dates (Multiple)
+      const tDatesRaw = await page
+        .locator("payui-identifiers-entity .identifier-value tux-text")
+        .allInnerTexts()
+        .catch(() => []);
+      const tDates = tDatesRaw.map((d) => d.trim()).filter((d) => d);
+
+      log(
+        `✅ Extracted: [${tStatus}] | ${tAmount} | ${tCard.substring(tCard.length - 8)}`,
+      );
+
+      console.log({
+        tStatus,
+        tAmount,
+        tProduct,
+        tCard,
+        tOrderIds,
+        tDates,
+        timePeriodLabel,
+      });
+
       // ==========================================
-      // 5. RETURN TO LIST
+      // 5. SAVE TO DATABASE
       // ==========================================
-      log("Returning to transaction list...");
+      try {
+        await db.collection("automations").doc(docId).collection(email).add({
+          type: "Transaction Detail",
+          status: tStatus,
+          amount: tAmount,
+          product_name: tProduct,
+          card_details: tCard,
+          order_ids: tOrderIds,
+          transaction_dates: tDates,
+          statement_month: timePeriodLabel,
+          created_at: new Date().toISOString(),
+        });
+        foundCardsCount++;
+      } catch (e) {
+        log("Warning: Failed to save transaction details to database.", "warn");
+      }
+
+      // Go back to the main statement list for the next iteration
       await page.goBack();
       await page.waitForLoadState("domcontentloaded").catch(() => {});
 
-      // Crucial delay to let Amazon's SPA rebuild the shadow DOM table
+      // Crucial: Wait for the Shadow DOM list component to rebuild
       await humanDelay(4000, 6000);
 
       currentIndex++;
     }
 
     log(
-      `✅ Finished scanning! Successfully saved ${foundCardsCount} card(s) to the database for ${targetMonth}.`,
+      `🎉 Finished scanning! Successfully saved ${foundCardsCount} detailed transaction(s) to the database for ${targetMonth}.`,
       "success",
     );
   } catch (error) {
