@@ -755,7 +755,7 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
             await db
               .collection("automations")
               .doc(docId)
-              .collection(email)
+              .collection("orders")
               .add({
                 order_number: orderIndex,
                 product_name: capturedProductName, // <--- Saving it even on error if it was grabbed

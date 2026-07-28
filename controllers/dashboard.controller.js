@@ -10,7 +10,12 @@ async function dashboard(req, res) {
     const decodedClaims = await auth.verifySessionCookie(sessionCookie, true);
     const uid = decodedClaims.uid;
 
-    const userDoc = await db.collection("users").doc(uid).get();
+    const userDoc = await db
+      .collection("users")
+      .doc(uid)
+      .collection("orders")
+      .doc("latest")
+      .get();
     let userData = userDoc.exists
       ? userDoc.data()
       : { notes: "No data found." };

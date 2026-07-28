@@ -229,11 +229,19 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         .catch(() => "Unknown Status");
 
       // 4b. Amount
-      const tAmount = await page
-        .locator("payment-status-header .tux-flex-row tux-text")
-        .first()
-        .innerText({ timeout: 3000 })
-        .catch(() => "Unknown Amount");
+      const headerTexts = await page
+        .locator("payment-status-header tux-text")
+        .allInnerTexts()
+        .catch(() => []);
+
+      const amtMatch = headerTexts.find((text) => text.includes("₹"));
+      const tAmount =
+        amtMatch?.trim() ||
+        (await page
+          .locator("payment-status-header .tux-flex-row tux-text")
+          .first()
+          .innerText({ timeout: 3000 })
+          .catch(() => "Unknown Amount"));
 
       // 4c. Product Name
       const tProduct = await page
@@ -276,6 +284,24 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         .catch(() => []);
       const tDates = tDatesRaw.map((d) => d.trim()).filter((d) => d);
 
+      const dateRegex =
+        /^\d{1,2}\s[A-Za-z]{3}\s\d{4},\s\d{1,2}:\d{2}\s(?:AM|PM)$/;
+      const finalDates = {};
+      let dateCount = 0;
+
+      tDates
+        .map((d) => d.trim())
+        .forEach((d) => {
+          if (dateRegex.test(d)) {
+            if (dateCount === 0) {
+              finalDates["order date"] = d;
+            } else if (dateCount === 1) {
+              finalDates["Expected Credit On"] = d;
+            }
+            dateCount++;
+          }
+        });
+
       log(
         `✅ Extracted: [${tStatus}] | ${tAmount} | ${tCard.substring(tCard.length - 8)}`,
       );
@@ -284,9 +310,9 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         tStatus,
         tAmount,
         tProduct,
-        tCard,
+        tCard: tCard.replace(/\D/g, ""),
         tOrderIds,
-        tDates,
+        finalDates,
         timePeriodLabel,
       });
 
@@ -294,17 +320,21 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       // 5. SAVE TO DATABASE
       // ==========================================
       try {
-        await db.collection("automations").doc(docId).collection(email).add({
-          type: "Transaction Detail",
-          status: tStatus,
-          amount: tAmount,
-          product_name: tProduct,
-          card_details: tCard,
-          order_ids: tOrderIds,
-          transaction_dates: tDates,
-          statement_month: timePeriodLabel,
-          created_at: new Date().toISOString(),
-        });
+        await db
+          .collection("automations")
+          .doc(docId)
+          .collection("card-details")
+          .add({
+            type: "Transaction Detail",
+            status: tStatus,
+            amount: tAmount,
+            product_name: tProduct,
+            card_details: tCard.replace(/\D/g, ""),
+            order_ids: tOrderIds,
+            transaction_dates: finalDates,
+            statement_month: timePeriodLabel,
+            created_at: new Date().toISOString(),
+          });
         foundCardsCount++;
       } catch (e) {
         log("Warning: Failed to save transaction details to database.", "warn");
