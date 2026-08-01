@@ -1,3 +1,6 @@
+/**
+ * Worker function to scrape card details from Amazon Payment Statements.
+ */
 async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
   const log = (msg, type = "info") =>
     socket.emit("log", { type, msg: `[${email} - Card Scraper] ${msg}` });
@@ -11,8 +14,17 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     },
   });
 
+  // Block non-essential media assets to speed up page loads and prevent timeouts
+  await context.route("**/*.{png,jpg,jpeg,pdf,svg,css,woff,woff2}", (route) =>
+    route.abort()
+  );
+
   let docId = null;
   const page = await context.newPage();
+
+  // Set default navigation timeout globally
+  page.setDefaultNavigationTimeout(60000);
+  page.setDefaultTimeout(20000);
 
   const humanDelay = async (min = 2500, max = 5500) => {
     const ms = Math.floor(Math.random() * (max - min + 1)) + min;
@@ -41,8 +53,8 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     // ==========================================
     log("Navigating to Amazon Sign-In...");
     await page.goto(
-      "https://www.amazon.in/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.in%2F%3Fref_%3Dnav_ya_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
-      { waitUntil: "commit", timeout: 60000 },
+      "https://www.amazon.in/ap/signin?openid.return_to=https%3A%2F%2Fwww.amazon.in%2F%3Fref_%3Dnav_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
+      { waitUntil: "domcontentloaded" }
     );
     await humanDelay(2000, 4000);
 
@@ -81,13 +93,13 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
 
     const pwdErrorBox = page
       .locator(
-        "#auth-error-message-box, .a-alert-content:has-text('Important Notice!'), .a-alert-content:has-text('password is incorrect')",
+        "#auth-error-message-box, .a-alert-content:has-text('Important Notice!'), .a-alert-content:has-text('password is incorrect')"
       )
       .first();
     if ((await pwdErrorBox.count()) > 0 && (await pwdErrorBox.isVisible())) {
       log(
         "Condition Failed: Password incorrect or account alert triggered.",
-        "error",
+        "error"
       );
       return;
     }
@@ -101,7 +113,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     const hasOtpInput =
       (await page
         .locator(
-          'input[name="otpCode"], input[name="code"], #cvf-input-code, #auth-mfa-otpcode',
+          'input[name="otpCode"], input[name="code"], #cvf-input-code, #auth-mfa-otpcode'
         )
         .count()) > 0;
 
@@ -109,7 +121,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       log("⚠️ ACTION REQUIRED: OTP or Security Challenge detected!", "warn");
       log(
         "Bot is PAUSED. Please enter the OTP manually in the opened browser window. (5 min timeout)",
-        "warn",
+        "warn"
       );
 
       try {
@@ -130,31 +142,40 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     // 2. NAVIGATE TO STATEMENTS & APPLY FILTERS
     // ==========================================
     log("Navigating to Amazon Payment Statements...");
+    
+    // Unblock CSS specifically for statements page rendering if necessary
     await page.goto("https://www.amazon.in/gp/payment/statement", {
-      waitUntil: "commit",
-      timeout: 60000,
+      waitUntil: "domcontentloaded",
+      timeout: 90000,
     });
-    await humanDelay(4000, 6000);
+
+    // Explicitly wait for the Shadow DOM Root container to mount
+    await page
+      .waitForSelector("payui-transaction-history-list-view, body", {
+        state: "visible",
+        timeout: 30000,
+      })
+      .catch(() => log("Warning: Statement component load slow", "warn"));
+
+    await humanDelay(3000, 5000);
 
     // Apply Payment Mode Filter
     log("Applying 'Credit/Debit Card' filter...");
     const cardFilterRadio = page
       .locator(`tux-text:has-text("Credit/Debit Card")`)
       .first();
+
     if (
       (await cardFilterRadio.count()) > 0 &&
       (await cardFilterRadio.isVisible())
     ) {
       await cardFilterRadio.click();
-      log(
-        `Payment mode filter applied. Waiting for table refresh...`,
-        "success",
-      );
+      log(`Payment mode filter applied. Waiting for table refresh...`, "success");
       await humanDelay(3000, 5000);
     } else {
       log(
         `Warning: 'Credit/Debit Card' filter not found. Proceeding anyway.`,
-        "warn",
+        "warn"
       );
     }
 
@@ -171,13 +192,13 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       await filterRadio.click();
       log(
         `Time filter applied. Waiting for transactions to load...`,
-        "success",
+        "success"
       );
-      await humanDelay(4000, 7000);
+      await humanDelay(4000, 6000);
     } else {
       log(
         `Warning: Could not find a filter for "${timePeriodLabel}". It may be too old or invalid.`,
-        "warn",
+        "warn"
       );
       throw new Error(`Filter ${timePeriodLabel} not found on page.`);
     }
@@ -192,13 +213,13 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     let foundCardsCount = 0;
 
     while (hasMoreTransactions) {
-      // Re-evaluate list dynamically to avoid Stale Element Reference errors
+      // Re-query rows dynamically on each loop to prevent stale references
       const transactionRows = page.locator(
-        "payui-transaction-history-list-view .default-theme .transaction-item",
+        "payui-transaction-history-list-view .default-theme .transaction-item"
       );
       const totalRows = await transactionRows.count();
 
-      if (currentIndex >= totalRows) {
+      if (totalRows === 0 || currentIndex >= totalRows) {
         hasMoreTransactions = false;
         break;
       }
@@ -209,10 +230,19 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         .nth(currentIndex)
         .locator(".tux-cursor-pointer")
         .first();
-      await clickableRow.click();
 
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
-      await humanDelay(3000, 5000);
+      if ((await clickableRow.count()) === 0) {
+        log(`Row at index ${currentIndex} not clickable. Skipping...`, "warn");
+        currentIndex++;
+        continue;
+      }
+
+      await clickableRow.click().catch(async () => {
+        // Fallback force click if UI element is overlapped
+        await clickableRow.click({ force: true });
+      });
+
+      await humanDelay(2500, 4000);
 
       // ==========================================
       // 4. EXTRACT DETAILED TRANSACTION DATA
@@ -222,10 +252,10 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       // 4a. Status
       const tStatus = await page
         .locator(
-          "payment-status-header .payment-status-bubble-wrapper tux-text",
+          "payment-status-header .payment-status-bubble-wrapper tux-text"
         )
         .first()
-        .innerText({ timeout: 3000 })
+        .innerText({ timeout: 4000 })
         .catch(() => "Unknown Status");
 
       // 4b. Amount
@@ -260,61 +290,48 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
           .innerText({ timeout: 3000 })
           .catch(() => "Unknown Card");
       } else {
-        // Regex Fallback
         const pageText = await page.innerText("body").catch(() => "");
         const cardMatch = pageText.match(
-          /(?:Visa|MasterCard|RuPay|Credit Card|Debit Card|Card).*?(?:ending in|ending with|\*\*)\s*(\d{4})/i,
+          /(?:Visa|MasterCard|RuPay|Credit Card|Debit Card|Card).*?(?:ending in|ending with|\*\*)\s*(\d{4})/i
         );
         if (cardMatch) tCard = cardMatch[0].trim();
       }
 
-      // 4e. Order IDs (Multiple)
+      // 4e. Order IDs
       const tOrderIdsRaw = await page
         .locator("payui-identifiers-entity tux-link")
         .allInnerTexts()
         .catch(() => []);
       const tOrderIds = tOrderIdsRaw
         .map((id) => id.replace(/,/g, "").trim())
-        .filter((id) => id);
+        .filter(Boolean);
 
-      // 4f. Dates (Multiple)
+      // 4f. Dates
       const tDatesRaw = await page
         .locator("payui-identifiers-entity .identifier-value tux-text")
         .allInnerTexts()
         .catch(() => []);
-      const tDates = tDatesRaw.map((d) => d.trim()).filter((d) => d);
+      const tDates = tDatesRaw.map((d) => d.trim()).filter(Boolean);
 
       const dateRegex =
         /^\d{1,2}\s[A-Za-z]{3}\s\d{4},\s\d{1,2}:\d{2}\s(?:AM|PM)$/;
       const finalDates = {};
       let dateCount = 0;
 
-      tDates
-        .map((d) => d.trim())
-        .forEach((d) => {
-          if (dateRegex.test(d)) {
-            if (dateCount === 0) {
-              finalDates["order date"] = d;
-            } else if (dateCount === 1) {
-              finalDates["Expected Credit On"] = d;
-            }
-            dateCount++;
+      tDates.forEach((d) => {
+        if (dateRegex.test(d)) {
+          if (dateCount === 0) {
+            finalDates["order date"] = d;
+          } else if (dateCount === 1) {
+            finalDates["Expected Credit On"] = d;
           }
-        });
+          dateCount++;
+        }
+      });
 
       log(
-        `✅ Extracted: [${tStatus}] | ${tAmount} | ${tCard.substring(tCard.length - 8)}`,
+        `✅ Extracted: [${tStatus}] | ${tAmount} | ${tCard.slice(-8)}`
       );
-
-      console.log({
-        tStatus,
-        tAmount,
-        tProduct,
-        tCard: tCard.replace(/\D/g, ""),
-        tOrderIds,
-        finalDates,
-        timePeriodLabel,
-      });
 
       // ==========================================
       // 5. SAVE TO DATABASE
@@ -340,19 +357,24 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         log("Warning: Failed to save transaction details to database.", "warn");
       }
 
-      // Go back to the main statement list for the next iteration
-      await page.goBack();
-      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      // Return to statement list gracefully (use UI back button if available, avoiding browser back refresh)
+      const backButton = page
+        .locator('tux-icon[name="chevron-left"], .back-button, button:has-text("Back")')
+        .first();
 
-      // Crucial: Wait for the Shadow DOM list component to rebuild
-      await humanDelay(4000, 6000);
+      if ((await backButton.count()) > 0 && (await backButton.isVisible())) {
+        await backButton.click();
+      } else {
+        await page.goBack({ waitUntil: "domcontentloaded" });
+      }
 
+      await humanDelay(3000, 5000);
       currentIndex++;
     }
 
     log(
       `🎉 Finished scanning! Successfully saved ${foundCardsCount} detailed transaction(s) to the database for ${targetMonth}.`,
-      "success",
+      "success"
     );
   } catch (error) {
     log(`ERROR: Scraping sequence interrupted: ${error.message}`, "error");

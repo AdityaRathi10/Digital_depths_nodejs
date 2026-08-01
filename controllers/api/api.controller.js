@@ -34,33 +34,29 @@ async function getOrders(req, res) {
     // Loop through all parent account documents
     for (const accountDoc of accountsSnapshot.docs) {
       const accountData = accountDoc.data();
-      const email = accountData.email;
+      // Fetch the dynamic sub-collection named after the email
+      const ordersSnapshot = await db
+        .collection("automations")
+        .doc(accountDoc.id)
+        .collection("orders")
+        .get();
 
-      if (email) {
-        // Fetch the dynamic sub-collection named after the email
-        const ordersSnapshot = await db
-          .collection("automations")
-          .doc(accountDoc.id)
-          .collection(email)
-          .get();
-
-        ordersSnapshot.forEach((orderDoc) => {
-          const orderData = orderDoc.data();
-          allOrders.push({
-            id: orderDoc.id,
-            email: email,
-            orderId: orderData.order_id || "Pending...",
-            productName: orderData.product_name || "N/A",
-            price:
-              orderData.order_price ||
-              orderData.checkout_total ||
-              orderData.price_found ||
-              "N/A",
-            status: orderData.status || "Pending",
-            createdAt: orderData.created_at || new Date().toISOString(),
-          });
+      ordersSnapshot.forEach((orderDoc) => {
+        const orderData = orderDoc.data();
+        allOrders.push({
+          id: orderDoc.id,
+          email: orderData.email || "N/A",
+          orderId: orderData.order_id || "Pending...",
+          productName: orderData.product_name || "N/A",
+          price:
+            orderData.order_price ||
+            orderData.checkout_total ||
+            orderData.price_found ||
+            "N/A",
+          status: orderData.status || "Pending",
+          createdAt: orderData.created_at || new Date().toISOString(),
         });
-      }
+      });
     }
 
     // Sort all orders globally by newest first
@@ -107,4 +103,142 @@ async function deleteEmail(req, res) {
   }
 }
 
-module.exports = { getAllMail, getOrders, deleteEmail };
+async function fetchAllCardDetails(req, res) {
+  try {
+    const accountsSnapshot = await db.collection("automations").get();
+    let allCardData = [];
+
+    for (const accountDoc of accountsSnapshot.docs) {
+      const accountData = accountDoc.data();
+      const email = accountData.email || "N/A";
+      const docId = accountDoc.id;
+
+      // Subcollection 'card-details' ko fetch kar rahe hain
+      const cardDetailsSnapshot = await db
+        .collection("automations")
+        .doc(docId)
+        .collection("card-details")
+        .get();
+
+      // console.log("cardDetailsSnapshot =>", cardDetailsSnapshot);
+
+      if (!cardDetailsSnapshot.empty) {
+        cardDetailsSnapshot.forEach((cardDoc) => {
+          const data = cardDoc.data();
+
+          // Extracting nested transaction_dates safely
+          const transactionDates = data.transaction_dates || {};
+          const orderDate = transactionDates["order date"] || "N/A";
+          const expectedCreditDate =
+            transactionDates["Expected Credit On"] || "N/A";
+
+          // Array of order_ids ko safe comma-separated string me convert kar rahe hain
+          const orderIds = Array.isArray(data.order_ids)
+            ? data.order_ids.join(", ")
+            : data.order_ids || "N/A";
+
+          allCardData.push({
+            id: cardDoc.id,
+            parentDocId: docId,
+            email: email,
+            amount: data.amount || "N/A",
+            cardDetails: data.card_details || "N/A",
+            orderIds: orderIds,
+            productName: data.product_name || "N/A",
+            statementMonth: data.statement_month || "N/A",
+            status: data.status || "Pending",
+            orderDate: orderDate,
+            expectedCreditDate: expectedCreditDate,
+            type: data.type || "Transaction Detail",
+            createdAt: data.created_at || new Date().toISOString(),
+          });
+        });
+      }
+    }
+
+    allCardData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return res.json({ success: true, cardDetails: allCardData });
+  } catch (error) {
+    console.error("Failed to fetch card details:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+
+async function clearAllOrderData(req, res) {
+  try {
+    // 1. Fetch all parent account documents from the "automations" collection
+    const accountsSnapshot = await db.collection("automations").get();
+    const deletePromises = [];
+
+    // 2. Loop through every account to find their "orders" sub-collection
+    for (const accountDoc of accountsSnapshot.docs) {
+      // Fetch all documents inside this account's "orders" sub-collection
+      const subCollectionRef = db
+        .collection("automations")
+        .doc(accountDoc.id)
+        .collection("orders");
+
+      const subCollectionSnapshot = await subCollectionRef.get();
+
+      // Add each deletion task to our massive promise array
+      subCollectionSnapshot.docs.forEach((doc) => {
+        deletePromises.push(doc.ref.delete());
+      });
+    }
+
+    // 3. Delete all documents across all accounts concurrently
+    await Promise.all(deletePromises);
+
+    res.json({
+      success: true,
+      message: `Successfully cleared all ${deletePromises.length} records across all accounts!`,
+    });
+  } catch (error) {
+    console.error("Failed to clear all database records:", error);
+    res.status(500).json({ error: "Failed to clear all data." });
+  }
+}
+
+async function clearAllCardData(req, res) {
+  try {
+    // 1. Fetch all parent account documents from the "automations" collection
+    const accountsSnapshot = await db.collection("automations").get();
+    const deletePromises = [];
+
+    // 2. Loop through every account to find their "orders" sub-collection
+    for (const accountDoc of accountsSnapshot.docs) {
+      // Fetch all documents inside this account's "orders" sub-collection
+      const subCollectionRef = db
+        .collection("automations")
+        .doc(accountDoc.id)
+        .collection("card-details");
+
+      const subCollectionSnapshot = await subCollectionRef.get();
+
+      // Add each deletion task to our massive promise array
+      subCollectionSnapshot.docs.forEach((doc) => {
+        deletePromises.push(doc.ref.delete());
+      });
+    }
+
+    // 3. Delete all documents across all accounts concurrently
+    await Promise.all(deletePromises);
+
+    res.json({
+      success: true,
+      message: `Successfully cleared all ${deletePromises.length} records across all accounts!`,
+    });
+  } catch (error) {
+    console.error("Failed to clear all database records:", error);
+    res.status(500).json({ error: "Failed to clear all data." });
+  }
+}
+
+module.exports = {
+  getAllMail,
+  getOrders,
+  deleteEmail,
+  fetchAllCardDetails,
+  clearAllOrderData,
+  clearAllCardData,
+};
