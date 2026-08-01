@@ -190,49 +190,53 @@ async function runAutomatonWorker(browser, email, config, socket, db) {
 
     for (let orderIndex = 1; orderIndex <= totalOrders; orderIndex++) {
       log(`----------------------------------------`);
-log(
-  `📦 Processing Order ${orderIndex} of ${totalOrders} [Current Tab]...`,
-);
-log(`----------------------------------------`);
-
-let capturedProductName = "Unknown Product";
-
-try {
-  // --- CLEAN ASIN LINK & FAST NAVIGATION ---
-  // Tracking parameters remove karke direct link banata hai (fast redirection)
-  const asinMatch = config.productLink.match(/(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
-  const cleanProductUrl = asinMatch ? `https://www.amazon.in/dp/${asinMatch[1]}` : config.productLink;
-
-  log(
-    `[Order ${orderIndex}/${totalOrders}] Fast navigating to: ${cleanProductUrl}`,
-  );
-
-  // waitUntil: "domcontentloaded" -> Page DOM ready hote hi aage badhega
-  await page.goto(cleanProductUrl, {
-    waitUntil: "domcontentloaded",
-    timeout: 30000,
-  });
-
-  // Dynamic Wait: Fixed 3-6s delay ki jagah element ready hote hi instantly trigger hoga
-  await page
-    .waitForSelector("#productTitle, #buy-now-button", { timeout: 8000 })
-    .catch(() => {});
-
-  // Capture Product Title
-  try {
-    const titleElement = page.locator("#productTitle").first();
-    if ((await titleElement.count()) > 0) {
-      capturedProductName = (await titleElement.innerText()).trim();
       log(
-        `Captured Product Title: ${capturedProductName.substring(0, 40)}...`,
-        "success",
+        `📦 Processing Order ${orderIndex} of ${totalOrders} [Current Tab]...`,
       );
-    } else {
-      log("Warning: #productTitle not found on product page.", "warn");
-    }
-  } catch (titleErr) {
-    log("Warning: Failed to extract product title.", "warn");
-  }
+      log(`----------------------------------------`);
+
+      let capturedProductName = "Unknown Product";
+
+      try {
+        // --- CLEAN ASIN LINK & FAST NAVIGATION ---
+        // Tracking parameters remove karke direct link banata hai (fast redirection)
+        const asinMatch = config.productLink.match(
+          /(?:dp|gp\/product)\/([A-Z0-9]{10})/i,
+        );
+        const cleanProductUrl = asinMatch
+          ? `https://www.amazon.in/dp/${asinMatch[1]}`
+          : config.productLink;
+
+        log(
+          `[Order ${orderIndex}/${totalOrders}] Fast navigating to: ${cleanProductUrl}`,
+        );
+
+        // waitUntil: "domcontentloaded" -> Page DOM ready hote hi aage badhega
+        await page.goto(cleanProductUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        });
+
+        // Dynamic Wait: Fixed 3-6s delay ki jagah element ready hote hi instantly trigger hoga
+        await page
+          .waitForSelector("#productTitle, #buy-now-button", { timeout: 8000 })
+          .catch(() => {});
+
+        // Capture Product Title
+        try {
+          const titleElement = page.locator("#productTitle").first();
+          if ((await titleElement.count()) > 0) {
+            capturedProductName = (await titleElement.innerText()).trim();
+            log(
+              `Captured Product Title: ${capturedProductName.substring(0, 40)}...`,
+              "success",
+            );
+          } else {
+            log("Warning: #productTitle not found on product page.", "warn");
+          }
+        } catch (titleErr) {
+          log("Warning: Failed to extract product title.", "warn");
+        }
 
         // --- QUANTITY SELECTION ---
         if (parseInt(config.quantity) > 1) {
@@ -349,7 +353,7 @@ try {
               await db
                 .collection("automations")
                 .doc(docId)
-                .collection(email)
+                .collection("orders")
                 .add({
                   order_number: orderIndex,
                   status: "Failed - Buy Now Unavailable (Added to Cart)",
@@ -526,16 +530,17 @@ try {
 
         if ((await totalLocator.count()) > 0) {
           const rawTotalText = await totalLocator.innerText();
-          const grandTotal = parseFloat(
-            rawTotalText.replace(/[^\d.-]/g, ""),
-          );
+          const grandTotal = parseFloat(rawTotalText.replace(/[^\d.-]/g, ""));
 
           // Support both naming conventions (minCheckoutTotal / minPrice & maxCheckoutTotal / maxPrice)
           const minLimit = parseFloat(
             config.minCheckoutTotal ?? config.minAmount ?? config.minPrice ?? 0,
           );
           const maxLimit = parseFloat(
-            config.maxCheckoutTotal ?? config.maxAmount ?? config.maxPrice ?? Number.MAX_VALUE,
+            config.maxCheckoutTotal ??
+              config.maxAmount ??
+              config.maxPrice ??
+              Number.MAX_VALUE,
           );
 
           log(
@@ -552,7 +557,7 @@ try {
             await db
               .collection("automations")
               .doc(docId)
-              .collection(email)
+              .collection("orders")
               .add({
                 order_number: orderIndex,
                 status: "Failed - Total Amount Outside Allowed Range",
@@ -731,11 +736,12 @@ try {
             await db
               .collection("automations")
               .doc(docId)
-              .collection(email)
+              .collection("orders")
               .add({
                 order_number: orderIndex,
                 order_id: orderId,
                 product_name: capturedProductName,
+                email: email,
                 order_price: orderPrice,
                 status: orderStatus,
                 created_at: new Date().toISOString(),
@@ -746,7 +752,7 @@ try {
             });
 
             log(
-              `Database sub-collection '${email}' updated for Order #${orderIndex}.`,
+              `Database sub-collection 'orders' updated for Order #${orderIndex}.`,
               "success",
             );
           } catch (e) {
@@ -794,7 +800,7 @@ try {
 
     if (docId) {
       try {
-        await db.collection("automations").doc(docId).collection(email).add({
+        await db.collection("automations").doc(docId).collection("orders").add({
           status: "Failed - Execution Error",
           error_message: error.message,
           created_at: new Date().toISOString(),

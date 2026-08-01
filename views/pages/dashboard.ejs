@@ -173,15 +173,15 @@
               </h2>
             </div>
             <div>
-            <button
-            type="button"
-              id="downloadCarddatabtn"
-              class="bg-blue-800 hover:bg-blue-900 text-white text-sm font-semibold py-2 px-4 rounded-md shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              onclick="exportCardDataToExcel()"
-            >
-              Download Card Data in Excel
-            </button>
-          </div>
+              <button
+                type="button"
+                id="downloadCarddatabtn"
+                class="bg-blue-800 hover:bg-blue-900 text-white text-sm font-semibold py-2 px-4 rounded-md shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                onclick="exportCardDataToExcel()"
+              >
+                Download Card Data in Excel
+              </button>
+            </div>
           </div>
           <div class="mb-4">
             <label
@@ -430,6 +430,28 @@
 
       // 4. Trigger the download!
       XLSX.writeFile(workbook, "DigitalDepths_Orders.xlsx");
+
+      try {
+        const response = await fetch('/api/orders/clear-all', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert(result.message);
+            // Optional: Reload the page or clear the table from the UI here
+            location.reload();
+        } else {
+            alert("Error: " + result.error);
+        }
+    } catch (error) {
+        console.error("Failed to delete orders:", error);
+        alert("A network error occurred while trying to delete orders.");
+    }
     } else {
       alert("No orders available to export.");
     }
@@ -466,8 +488,30 @@
 
       // 4. Trigger the download!
       XLSX.writeFile(workbook, "DigitalDepths_CardsDetails.xlsx");
+
+      try {
+        const response = await fetch('/api/card-details/clear-all', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            alert(result.message);
+            // Optional: Reload the page or clear the table from the UI here
+            location.reload();
+        } else {
+            alert("Error: " + result.error);
+        }
+    } catch (error) {
+        console.error("Failed to delete orders:", error);
+        alert("A network error occurred while trying to delete orders.");
+    }
     } else {
-      alert("No card details available to export.");
+      alert("No orders available to export.");
     }
   }
 
@@ -496,6 +540,4 @@
     loadOrdersDashboard();
     setInterval(loadOrdersDashboard, 15000);
   });
-
-
 </script>
