@@ -128,7 +128,7 @@ async function fetchAllCardDetails(req, res) {
 
           // Extracting nested transaction_dates safely
           const transactionDates = data.transaction_dates || {};
-          const orderDate = transactionDates["order date"] || "N/A";
+          const orderDate = transactionDates["Order date"] || "N/A";
           const expectedCreditDate =
             transactionDates["Expected Credit On"] || "N/A";
 

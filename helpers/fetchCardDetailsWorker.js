@@ -16,7 +16,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
 
   // Block non-essential media assets to speed up page loads and prevent timeouts
   await context.route("**/*.{png,jpg,jpeg,pdf,svg,css,woff,woff2}", (route) =>
-    route.abort()
+    route.abort(),
   );
 
   let docId = null;
@@ -54,7 +54,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     log("Navigating to Amazon Sign-In...");
     await page.goto(
       "https://www.amazon.in/ap/signin?openid.return_to=https%3A%2F%2Fwww.amazon.in%2F%3Fref_%3Dnav_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=inflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0",
-      { waitUntil: "domcontentloaded" }
+      { waitUntil: "domcontentloaded" },
     );
     await humanDelay(2000, 4000);
 
@@ -93,13 +93,13 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
 
     const pwdErrorBox = page
       .locator(
-        "#auth-error-message-box, .a-alert-content:has-text('Important Notice!'), .a-alert-content:has-text('password is incorrect')"
+        "#auth-error-message-box, .a-alert-content:has-text('Important Notice!'), .a-alert-content:has-text('password is incorrect')",
       )
       .first();
     if ((await pwdErrorBox.count()) > 0 && (await pwdErrorBox.isVisible())) {
       log(
         "Condition Failed: Password incorrect or account alert triggered.",
-        "error"
+        "error",
       );
       return;
     }
@@ -113,7 +113,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     const hasOtpInput =
       (await page
         .locator(
-          'input[name="otpCode"], input[name="code"], #cvf-input-code, #auth-mfa-otpcode'
+          'input[name="otpCode"], input[name="code"], #cvf-input-code, #auth-mfa-otpcode',
         )
         .count()) > 0;
 
@@ -121,7 +121,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       log("⚠️ ACTION REQUIRED: OTP or Security Challenge detected!", "warn");
       log(
         "Bot is PAUSED. Please enter the OTP manually in the opened browser window. (5 min timeout)",
-        "warn"
+        "warn",
       );
 
       try {
@@ -142,7 +142,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     // 2. NAVIGATE TO STATEMENTS & APPLY FILTERS
     // ==========================================
     log("Navigating to Amazon Payment Statements...");
-    
+
     // Unblock CSS specifically for statements page rendering if necessary
     await page.goto("https://www.amazon.in/gp/payment/statement", {
       waitUntil: "domcontentloaded",
@@ -170,12 +170,15 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       (await cardFilterRadio.isVisible())
     ) {
       await cardFilterRadio.click();
-      log(`Payment mode filter applied. Waiting for table refresh...`, "success");
+      log(
+        `Payment mode filter applied. Waiting for table refresh...`,
+        "success",
+      );
       await humanDelay(3000, 5000);
     } else {
       log(
         `Warning: 'Credit/Debit Card' filter not found. Proceeding anyway.`,
-        "warn"
+        "warn",
       );
     }
 
@@ -192,19 +195,19 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       await filterRadio.click();
       log(
         `Time filter applied. Waiting for transactions to load...`,
-        "success"
+        "success",
       );
       await humanDelay(4000, 6000);
     } else {
       log(
         `Warning: Could not find a filter for "${timePeriodLabel}". It may be too old or invalid.`,
-        "warn"
+        "warn",
       );
       throw new Error(`Filter ${timePeriodLabel} not found on page.`);
     }
 
     // ==========================================
-    // 3. ITERATE THROUGH TRANSACTIONS
+    // 3. ITERATE THROUGH TRANSACTIONS (WITH INFINITE SCROLL)
     // ==========================================
     log("Scanning filtered list for transactions...");
 
@@ -215,13 +218,49 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     while (hasMoreTransactions) {
       // Re-query rows dynamically on each loop to prevent stale references
       const transactionRows = page.locator(
-        "payui-transaction-history-list-view .default-theme .transaction-item"
+        "payui-transaction-history-list-view .default-theme .transaction-item",
       );
-      const totalRows = await transactionRows.count();
+      let totalRows = await transactionRows.count();
 
-      if (totalRows === 0 || currentIndex >= totalRows) {
+      if (totalRows === 0) {
+        log("No transactions found for this filter.", "warn");
         hasMoreTransactions = false;
         break;
+      }
+
+      // INFINITE SCROLL LOGIC
+      if (currentIndex >= totalRows) {
+        log(
+          `Reached end of currently loaded list (${totalRows}). Scrolling to bottom to load more...`,
+          "info",
+        );
+
+        // Scroll to the absolute bottom of the page
+        await page.evaluate(() =>
+          window.scrollTo(0, document.body.scrollHeight),
+        );
+
+        // Wait exactly 10 seconds for Amazon's lazy-load AJAX to trigger and render
+        log("Waiting 10 seconds for more transactions to load...");
+        await page.waitForTimeout(10000);
+
+        // Re-evaluate the total rows after scrolling
+        const newTotalRows = await transactionRows.count();
+
+        if (newTotalRows > totalRows) {
+          log(
+            `Success! Loaded ${newTotalRows - totalRows} more transactions. Resuming extraction...`,
+            "success",
+          );
+          totalRows = newTotalRows; // The loop will now naturally continue processing currentIndex
+        } else {
+          log(
+            `No more transactions loaded. Reached the absolute end at ${totalRows} transactions.`,
+            "success",
+          );
+          hasMoreTransactions = false;
+          break;
+        }
       }
 
       log(`Opening transaction ${currentIndex + 1} of ${totalRows}...`);
@@ -249,29 +288,42 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       // ==========================================
       log("Extracting transaction data points...");
 
-      // 4a. Status
-      const tStatus = await page
-        .locator(
-          "payment-status-header .payment-status-bubble-wrapper tux-text"
-        )
-        .first()
-        .innerText({ timeout: 4000 })
-        .catch(() => "Unknown Status");
+      let tStatus = "Unknown Status";
+      let tAmount = "Unknown Amount";
 
-      // 4b. Amount
-      const headerTexts = await page
-        .locator("payment-status-header tux-text")
-        .allInnerTexts()
-        .catch(() => []);
+      // 4a & 4b. Status and Amount (Robust try/catch to prevent crashes)
+      try {
+        const headerTexts = await page
+          .locator("payment-status-header tux-text")
+          .allInnerTexts();
 
-      const amtMatch = headerTexts.find((text) => text.includes("₹"));
-      const tAmount =
-        amtMatch?.trim() ||
-        (await page
-          .locator("payment-status-header .tux-flex-row tux-text")
-          .first()
-          .innerText({ timeout: 3000 })
-          .catch(() => "Unknown Amount"));
+        // Extract Amount
+        const amtMatch = headerTexts.find((text) => text.includes("₹"));
+        if (amtMatch) {
+          tAmount = amtMatch.trim();
+        } else {
+          // Safe fallback checking
+          const fallbackLocator = page
+            .locator("payment-status-header .tux-flex-row tux-text")
+            .first();
+          if ((await fallbackLocator.count()) > 0) {
+            tAmount = await fallbackLocator.innerText({ timeout: 3000 });
+          }
+        }
+
+        // Extract Status
+        const statusMatch = headerTexts.find(
+          (text) => !text.includes("₹") && text.trim().length > 0,
+        );
+        if (statusMatch) {
+          tStatus = statusMatch.trim();
+        }
+      } catch (e) {
+        log(
+          "Warning: Failed to extract precise status or amount. Falling back to Unknown.",
+          "warn",
+        );
+      }
 
       // 4c. Product Name
       const tProduct = await page
@@ -292,7 +344,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       } else {
         const pageText = await page.innerText("body").catch(() => "");
         const cardMatch = pageText.match(
-          /(?:Visa|MasterCard|RuPay|Credit Card|Debit Card|Card).*?(?:ending in|ending with|\*\*)\s*(\d{4})/i
+          /(?:Visa|MasterCard|RuPay|Credit Card|Debit Card|Card).*?(?:ending in|ending with|\*\*)\s*(\d{4})/i,
         );
         if (cardMatch) tCard = cardMatch[0].trim();
       }
@@ -306,7 +358,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         .map((id) => id.replace(/,/g, "").trim())
         .filter(Boolean);
 
-      // 4f. Dates
+      // 4f. Dates (Strict mapping)
       const tDatesRaw = await page
         .locator("payui-identifiers-entity .identifier-value tux-text")
         .allInnerTexts()
@@ -321,7 +373,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       tDates.forEach((d) => {
         if (dateRegex.test(d)) {
           if (dateCount === 0) {
-            finalDates["order date"] = d;
+            finalDates["Order date"] = d;
           } else if (dateCount === 1) {
             finalDates["Expected Credit On"] = d;
           }
@@ -329,9 +381,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         }
       });
 
-      log(
-        `✅ Extracted: [${tStatus}] | ${tAmount} | ${tCard.slice(-8)}`
-      );
+      log(`✅ Extracted: [${tStatus}] | ${tAmount} | ${tCard.slice(-8)}`);
 
       // ==========================================
       // 5. SAVE TO DATABASE
@@ -357,9 +407,11 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         log("Warning: Failed to save transaction details to database.", "warn");
       }
 
-      // Return to statement list gracefully (use UI back button if available, avoiding browser back refresh)
+      // Return to statement list gracefully
       const backButton = page
-        .locator('tux-icon[name="chevron-left"], .back-button, button:has-text("Back")')
+        .locator(
+          'tux-icon[name="chevron-left"], .back-button, button:has-text("Back")',
+        )
         .first();
 
       if ((await backButton.count()) > 0 && (await backButton.isVisible())) {
@@ -374,7 +426,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
 
     log(
       `🎉 Finished scanning! Successfully saved ${foundCardsCount} detailed transaction(s) to the database for ${targetMonth}.`,
-      "success"
+      "success",
     );
   } catch (error) {
     log(`ERROR: Scraping sequence interrupted: ${error.message}`, "error");

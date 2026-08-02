@@ -433,25 +433,25 @@
 
       try {
         const response = await fetch('/api/orders/clear-all', {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json'
-            }
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          }
         });
 
         const result = await response.json();
 
         if (response.ok) {
-            alert(result.message);
-            // Optional: Reload the page or clear the table from the UI here
-            location.reload();
+          alert(result.message);
+          // Optional: Reload the page or clear the table from the UI here
+          location.reload();
         } else {
-            alert("Error: " + result.error);
+          alert("Error: " + result.error);
         }
-    } catch (error) {
+      } catch (error) {
         console.error("Failed to delete orders:", error);
         alert("A network error occurred while trying to delete orders.");
-    }
+      }
     } else {
       alert("No orders available to export.");
     }
@@ -463,21 +463,21 @@
     console.log("Fetched Card Details:", data);
 
     if (data.success && data.cardDetails && data.cardDetails.length > 0) {
-  // Map card-details data for clean Excel export / display
-  const cleanData = data.cardDetails.map((item) => ({
-    "Doc ID": item.id || "N/A",
-    "Email": item.email || "N/A",
-    "Amount": item.amount || "N/A",
-    "Card Digits": item.cardDetails || "N/A",
-    "Order ID(s)": item.orderIds || "N/A",
-    "Product Name": item.productName || "N/A",
-    "Statement Month": item.statementMonth || "N/A",
-    "Status": item.status || "Pending",
-    "Order Date": item.orderDate || "N/A",
-    "Expected Credit Date": item.expectedCreditDate || "N/A",
-    "Type": item.type || "Transaction Detail",
-    "Created At": item.createdAt ? new Date(item.createdAt).toLocaleString() : "N/A",
-  }));
+      // Map card-details data for clean Excel export / display
+      const cleanData = data.cardDetails.map((item) => ({
+        "Doc ID": item.id || "N/A",
+        "Email": item.email || "N/A",
+        "Amount": item.amount || "N/A",
+        "Card Digits": item.cardDetails || "N/A",
+        "Order ID(s)": item.orderIds || "N/A",
+        "Product Name": item.productName || "N/A",
+        "Statement Month": item.statementMonth || "N/A",
+        "Status": item.status || "Pending",
+        "Order Date": item.orderDate || "N/A",
+        "Expected Credit Date": item.expectedCreditDate || "N/A",
+        "Type": item.type || "Transaction Detail",
+        "Created At": item.createdAt ? new Date(item.createdAt).toLocaleString() : "N/A",
+      }));
 
       // 2. Convert the JSON array to an Excel worksheet
       const worksheet = XLSX.utils.json_to_sheet(cleanData);
@@ -491,25 +491,25 @@
 
       try {
         const response = await fetch('/api/card-details/clear-all', {
-            method: 'DELETE',
-            headers: {
-                'Content-Type': 'application/json'
-            }
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          }
         });
 
         const result = await response.json();
 
         if (response.ok) {
-            alert(result.message);
-            // Optional: Reload the page or clear the table from the UI here
-            location.reload();
+          alert(result.message);
+          // Optional: Reload the page or clear the table from the UI here
+          location.reload();
         } else {
-            alert("Error: " + result.error);
+          alert("Error: " + result.error);
         }
-    } catch (error) {
+      } catch (error) {
         console.error("Failed to delete orders:", error);
         alert("A network error occurred while trying to delete orders.");
-    }
+      }
     } else {
       alert("No orders available to export.");
     }
@@ -530,7 +530,6 @@
     }
 
     // Send the data TO the server matching the exact event name in Step 2
-    console.log("Sending data to server...", {email, targetMonth});
     socket.emit('trigger-get-card-details', { email: email, targetMonth: targetMonth });
   });
 
