@@ -221,6 +221,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         "payui-transaction-history-list-view .default-theme .transaction-item",
       );
       let totalRows = await transactionRows.count();
+      console.log(`totalRows =>`, totalRows);
 
       if (totalRows === 0) {
         log("No transactions found for this filter.", "warn");
@@ -252,11 +253,18 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
             `Success! Loaded ${newTotalRows - totalRows} more transactions. Resuming extraction...`,
             "success",
           );
+          console.log(
+            `Success! Loaded ${newTotalRows - totalRows} more transactions. Resuming extraction...`,
+          );
           totalRows = newTotalRows; // The loop will now naturally continue processing currentIndex
+          console.log(`totalRows =>`, totalRows);
         } else {
           log(
             `No more transactions loaded. Reached the absolute end at ${totalRows} transactions.`,
             "success",
+          );
+          console.log(
+            `No more transactions loaded. Reached the absolute end at ${totalRows} transactions.`,
           );
           hasMoreTransactions = false;
           break;
@@ -272,7 +280,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
 
       if ((await clickableRow.count()) === 0) {
         log(`Row at index ${currentIndex} not clickable. Skipping...`, "warn");
-        currentIndex++;
+        // currentIndex++;
         continue;
       }
 
@@ -403,6 +411,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
             created_at: new Date().toISOString(),
           });
         foundCardsCount++;
+        console.log("foundCardsCount =>", foundCardsCount);
       } catch (e) {
         log("Warning: Failed to save transaction details to database.", "warn");
       }
@@ -430,6 +439,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     );
   } catch (error) {
     log(`ERROR: Scraping sequence interrupted: ${error.message}`, "error");
+    console.log("error =>", error);
   } finally {
     if (context) {
       log("Closing isolated browser session...", "warn");
