@@ -143,13 +143,11 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     // ==========================================
     log("Navigating to Amazon Payment Statements...");
 
-    // Unblock CSS specifically for statements page rendering if necessary
     await page.goto("https://www.amazon.in/gp/payment/statement", {
       waitUntil: "domcontentloaded",
       timeout: 90000,
     });
 
-    // Explicitly wait for the Shadow DOM Root container to mount
     await page
       .waitForSelector("payui-transaction-history-list-view, body", {
         state: "visible",
@@ -175,11 +173,6 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         "success",
       );
       await humanDelay(3000, 5000);
-    } else {
-      log(
-        `Warning: 'Credit/Debit Card' filter not found. Proceeding anyway.`,
-        "warn",
-      );
     }
 
     // Apply Time Period Filter
@@ -207,7 +200,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     }
 
     // ==========================================
-    // 3. ITERATE THROUGH TRANSACTIONS (WITH INFINITE SCROLL)
+    // 3. ITERATE THROUGH TRANSACTIONS (STATE RESTORATION LOOP)
     // ==========================================
     log("Scanning filtered list for transactions...");
 
@@ -216,12 +209,10 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     let foundCardsCount = 0;
 
     while (hasMoreTransactions) {
-      // Re-query rows dynamically on each loop to prevent stale references
       const transactionRows = page.locator(
         "payui-transaction-history-list-view .default-theme .transaction-item",
       );
       let totalRows = await transactionRows.count();
-      console.log(`totalRows =>`, totalRows);
 
       if (totalRows === 0) {
         log("No transactions found for this filter.", "warn");
@@ -229,47 +220,60 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         break;
       }
 
-      // INFINITE SCROLL LOGIC
-      if (currentIndex >= totalRows) {
+      // ---------------------------------------------------------
+      // FIX: STATE RESTORATION / CONTINUOUS INFINITE SCROLL
+      // ---------------------------------------------------------
+      // If Amazon reloaded the page back to 20 items, but our currentIndex is 40,
+      // this while loop forces the page to keep scrolling until the DOM
+      // reaches the item we need, or until the history ends.
+      let scrollAttempts = 0;
+      while (currentIndex >= totalRows) {
         log(
-          `Reached end of currently loaded list (${totalRows}). Scrolling to bottom to load more...`,
+          `Restoring list state (Target Index: ${currentIndex}, Loaded: ${totalRows}). Scrolling...`,
           "info",
         );
 
-        // Scroll to the absolute bottom of the page
+        console.log(
+          `Restoring list state (Target Index: ${currentIndex}, Loaded: ${totalRows}). Scrolling...`,
+        );
+
         await page.evaluate(() =>
           window.scrollTo(0, document.body.scrollHeight),
         );
 
-        // Wait exactly 10 seconds for Amazon's lazy-load AJAX to trigger and render
-        log("Waiting 10 seconds for more transactions to load...");
-        await page.waitForTimeout(10000);
+        // Wait for Amazon's lazy-load to fetch the next batch
+        await page.waitForTimeout(6000);
 
-        // Re-evaluate the total rows after scrolling
         const newTotalRows = await transactionRows.count();
 
-        if (newTotalRows > totalRows) {
-          log(
-            `Success! Loaded ${newTotalRows - totalRows} more transactions. Resuming extraction...`,
-            "success",
-          );
-          console.log(
-            `Success! Loaded ${newTotalRows - totalRows} more transactions. Resuming extraction...`,
-          );
-          totalRows = newTotalRows; // The loop will now naturally continue processing currentIndex
-          console.log(`totalRows =>`, totalRows);
-        } else {
-          log(
-            `No more transactions loaded. Reached the absolute end at ${totalRows} transactions.`,
-            "success",
-          );
-          console.log(
-            `No more transactions loaded. Reached the absolute end at ${totalRows} transactions.`,
-          );
-          hasMoreTransactions = false;
+        console.log("newTotalRows =>", newTotalRows);
+
+        if (newTotalRows === totalRows) {
+          // If we scrolled and waited but the count didn't increase, we hit the absolute end.
+          break;
+        }
+
+        totalRows = newTotalRows;
+        console.log("Updated totalRows =>", totalRows);
+        scrollAttempts++;
+
+        // Failsafe to prevent endless scrolling if UI breaks
+        if (scrollAttempts > 20) {
+          log("Warning: Exceeded safe scroll limits.", "warn");
           break;
         }
       }
+
+      // Check if we hit the absolute end of the user's history
+      if (currentIndex >= totalRows) {
+        log(
+          `No more items to load. Reached absolute end at ${totalRows} transactions.`,
+          "success",
+        );
+        hasMoreTransactions = false;
+        break;
+      }
+      // ---------------------------------------------------------
 
       log(`Opening transaction ${currentIndex + 1} of ${totalRows}...`);
 
@@ -278,14 +282,18 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         .locator(".tux-cursor-pointer")
         .first();
 
+      // If after fully restoring the list state, the item is still not clickable,
+      // it is genuinely an invalid row.
       if ((await clickableRow.count()) === 0) {
-        log(`Row at index ${currentIndex} not clickable. Skipping...`, "warn");
-        // currentIndex++;
+        log(
+          `Row at index ${currentIndex} genuinely not clickable. Skipping...`,
+          "warn",
+        );
+        currentIndex++;
         continue;
       }
 
       await clickableRow.click().catch(async () => {
-        // Fallback force click if UI element is overlapped
         await clickableRow.click({ force: true });
       });
 
@@ -299,18 +307,15 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       let tStatus = "Unknown Status";
       let tAmount = "Unknown Amount";
 
-      // 4a & 4b. Status and Amount (Robust try/catch to prevent crashes)
       try {
         const headerTexts = await page
           .locator("payment-status-header tux-text")
           .allInnerTexts();
 
-        // Extract Amount
         const amtMatch = headerTexts.find((text) => text.includes("₹"));
         if (amtMatch) {
           tAmount = amtMatch.trim();
         } else {
-          // Safe fallback checking
           const fallbackLocator = page
             .locator("payment-status-header .tux-flex-row tux-text")
             .first();
@@ -319,28 +324,20 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
           }
         }
 
-        // Extract Status
         const statusMatch = headerTexts.find(
           (text) => !text.includes("₹") && text.trim().length > 0,
         );
         if (statusMatch) {
           tStatus = statusMatch.trim();
         }
-      } catch (e) {
-        log(
-          "Warning: Failed to extract precise status or amount. Falling back to Unknown.",
-          "warn",
-        );
-      }
+      } catch (e) {}
 
-      // 4c. Product Name
       const tProduct = await page
         .locator('div[part="title"] span, .title-below span')
         .first()
         .innerText({ timeout: 3000 })
         .catch(() => "Unknown Product");
 
-      // 4d. Card Details
       let tCard = "Unknown Card";
       const cardEl = page
         .locator('payment-method-entity tux-text:has-text("**")')
@@ -357,7 +354,6 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         if (cardMatch) tCard = cardMatch[0].trim();
       }
 
-      // 4e. Order IDs
       const tOrderIdsRaw = await page
         .locator("payui-identifiers-entity tux-link")
         .allInnerTexts()
@@ -366,7 +362,6 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         .map((id) => id.replace(/,/g, "").trim())
         .filter(Boolean);
 
-      // 4f. Dates (Strict mapping)
       const tDatesRaw = await page
         .locator("payui-identifiers-entity .identifier-value tux-text")
         .allInnerTexts()
