@@ -220,6 +220,7 @@ io.on("connection", (socket) => {
 
       // Call the existing worker function
       await fetchCardDetailsWorker(browser, email, targetMonth, socket, db);
+      console.log("Closing isolated browser session in app...", "warn");
       await browser.close(); // Close the browser after fetching card details
     } catch (error) {
       console.error("Error in trigger-get-card-details:", error);

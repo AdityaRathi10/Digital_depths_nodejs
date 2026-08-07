@@ -22,9 +22,9 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
   let docId = null;
   const page = await context.newPage();
 
-  // Set default navigation timeout globally
-  page.setDefaultNavigationTimeout(60000);
-  page.setDefaultTimeout(20000);
+  // FIX: Increased default timeouts drastically to accommodate very slow network connections
+  page.setDefaultNavigationTimeout(120000); // 2 minutes
+  page.setDefaultTimeout(60000); // 1 minute
 
   const humanDelay = async (min = 2500, max = 5500) => {
     const ms = Math.floor(Math.random() * (max - min + 1)) + min;
@@ -49,7 +49,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     const password = snapshot.docs[0].data().password;
 
     // ==========================================
-    // 1. STANDARD LOGIN SEQUENCE (WITH OTP INTERCEPT)
+    // 1. STANDARD LOGIN SEQUENCE
     // ==========================================
     log("Navigating to Amazon Sign-In...");
     await page.goto(
@@ -62,7 +62,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       const emailLocator = page
         .locator("input[type='email'], input[name='email'], #ap_email")
         .first();
-      await emailLocator.waitFor({ state: "visible", timeout: 15000 });
+      await emailLocator.waitFor({ state: "visible" });
       await emailLocator.fill(email);
       await humanDelay(1500, 3000);
       await page
@@ -78,7 +78,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     const passwordLocator = page
       .locator("input[type='password'], #ap_password, input[name='password']")
       .first();
-    await passwordLocator.waitFor({ state: "visible", timeout: 15000 });
+    await passwordLocator.waitFor({ state: "visible" });
     await passwordLocator.fill(password);
     await humanDelay(1500, 3000);
 
@@ -145,13 +145,11 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
 
     await page.goto("https://www.amazon.in/gp/payment/statement", {
       waitUntil: "domcontentloaded",
-      timeout: 90000,
     });
 
     await page
       .waitForSelector("payui-transaction-history-list-view, body", {
         state: "visible",
-        timeout: 30000,
       })
       .catch(() => log("Warning: Statement component load slow", "warn"));
 
@@ -200,7 +198,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
     }
 
     // ==========================================
-    // 3. ITERATE THROUGH TRANSACTIONS (STATE RESTORATION LOOP)
+    // 3. ITERATE THROUGH TRANSACTIONS
     // ==========================================
     log("Scanning filtered list for transactions...");
 
@@ -221,54 +219,71 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       }
 
       // ---------------------------------------------------------
-      // FIX: STATE RESTORATION / CONTINUOUS INFINITE SCROLL
+      // FIX: SLOW NETWORK TOLERANT SCROLL LOOP
       // ---------------------------------------------------------
-      // If Amazon reloaded the page back to 20 items, but our currentIndex is 40,
-      // this while loop forces the page to keep scrolling until the DOM
-      // reaches the item we need, or until the history ends.
       let scrollAttempts = 0;
+      let noNewRowsCount = 0; // Tracks consecutive failures to load new rows
+
       while (currentIndex >= totalRows) {
         log(
-          `Restoring list state (Target Index: ${currentIndex}, Loaded: ${totalRows}). Scrolling...`,
+          `Restoring list state (Target: ${currentIndex}, Loaded: ${totalRows}). Scrolling...`,
           "info",
         );
-
         console.log(
-          `Restoring list state (Target Index: ${currentIndex}, Loaded: ${totalRows}). Scrolling...`,
+          `Restoring list state (Target: ${currentIndex}, Loaded: ${totalRows}). Scrolling...`,
         );
 
         await page.evaluate(() =>
           window.scrollTo(0, document.body.scrollHeight),
         );
 
-        // Wait for Amazon's lazy-load to fetch the next batch
-        await page.waitForTimeout(6000);
+        // Increased wait time for slow internet
+        await page.waitForTimeout(8000);
 
         const newTotalRows = await transactionRows.count();
-
         console.log("newTotalRows =>", newTotalRows);
 
         if (newTotalRows === totalRows) {
-          // If we scrolled and waited but the count didn't increase, we hit the absolute end.
-          break;
+          // If slow internet caused a delay, we don't break immediately. We retry up to 3 times.
+          noNewRowsCount++;
+          log(
+            `No new rows detected. Retry attempt ${noNewRowsCount}/3 for slow networks...`,
+            "warn",
+          );
+
+          if (noNewRowsCount >= 3) {
+            log(
+              `Reached maximum retries. Assuming absolute end of list.`,
+              "info",
+            );
+            break;
+          }
+        } else {
+          // Success! Network delivered the data. Reset the failure counter.
+          noNewRowsCount = 0;
         }
 
         totalRows = newTotalRows;
         console.log("Updated totalRows =>", totalRows);
+        console.log("scrollAttempts =>", scrollAttempts);
         scrollAttempts++;
 
-        // Failsafe to prevent endless scrolling if UI breaks
-        if (scrollAttempts > 20) {
-          log("Warning: Exceeded safe scroll limits.", "warn");
+        if (scrollAttempts > 30) {
+          log(
+            "Warning: Exceeded absolute maximum scroll limits. Breaking to prevent infinite loop.",
+            "warn",
+          );
           break;
         }
       }
 
-      // Check if we hit the absolute end of the user's history
       if (currentIndex >= totalRows) {
         log(
           `No more items to load. Reached absolute end at ${totalRows} transactions.`,
           "success",
+        );
+        console.log(
+          `No more items to load. Reached absolute end at ${totalRows} transactions.`,
         );
         hasMoreTransactions = false;
         break;
@@ -282,12 +297,13 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         .locator(".tux-cursor-pointer")
         .first();
 
-      // If after fully restoring the list state, the item is still not clickable,
-      // it is genuinely an invalid row.
       if ((await clickableRow.count()) === 0) {
         log(
           `Row at index ${currentIndex} genuinely not clickable. Skipping...`,
           "warn",
+        );
+        console.log(
+          `Row at index ${currentIndex} genuinely not clickable. Skipping...`,
         );
         currentIndex++;
         continue;
@@ -297,7 +313,8 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         await clickableRow.click({ force: true });
       });
 
-      await humanDelay(2500, 4000);
+      // Increased delay to ensure the detail page fully renders on slow networks
+      await humanDelay(3500, 6000);
 
       // ==========================================
       // 4. EXTRACT DETAILED TRANSACTION DATA
@@ -320,7 +337,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
             .locator("payment-status-header .tux-flex-row tux-text")
             .first();
           if ((await fallbackLocator.count()) > 0) {
-            tAmount = await fallbackLocator.innerText({ timeout: 3000 });
+            tAmount = await fallbackLocator.innerText({ timeout: 5000 });
           }
         }
 
@@ -335,7 +352,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       const tProduct = await page
         .locator('div[part="title"] span, .title-below span')
         .first()
-        .innerText({ timeout: 3000 })
+        .innerText({ timeout: 5000 })
         .catch(() => "Unknown Product");
 
       let tCard = "Unknown Card";
@@ -344,7 +361,7 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         .first();
       if ((await cardEl.count()) > 0) {
         tCard = await cardEl
-          .innerText({ timeout: 3000 })
+          .innerText({ timeout: 5000 })
           .catch(() => "Unknown Card");
       } else {
         const pageText = await page.innerText("body").catch(() => "");
@@ -418,13 +435,21 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
         )
         .first();
 
-      if ((await backButton.count()) > 0 && (await backButton.isVisible())) {
-        await backButton.click();
-      } else {
-        await page.goBack({ waitUntil: "domcontentloaded" });
+      try {
+        if ((await backButton.count()) > 0 && (await backButton.isVisible())) {
+          await backButton.click();
+        } else {
+          await page.goBack({ waitUntil: "domcontentloaded" });
+        }
+      } catch (err) {
+        log("Warning: Back navigation timed out, forcing reload...", "warn");
+        await page.goto("https://www.amazon.in/gp/payment/statement", {
+          waitUntil: "domcontentloaded",
+        });
       }
 
-      await humanDelay(3000, 5000);
+      // Give the list slightly more time to reconstruct the DOM
+      await humanDelay(4000, 6000);
       currentIndex++;
     }
 
@@ -432,12 +457,16 @@ async function fetchCardDetailsWorker(browser, email, targetMonth, socket, db) {
       `🎉 Finished scanning! Successfully saved ${foundCardsCount} detailed transaction(s) to the database for ${targetMonth}.`,
       "success",
     );
+    console.log(
+      `🎉 Finished scanning! Successfully saved ${foundCardsCount} detailed transaction(s) to the database for ${targetMonth}.`,
+    );
   } catch (error) {
     log(`ERROR: Scraping sequence interrupted: ${error.message}`, "error");
     console.log("error =>", error);
   } finally {
     if (context) {
       log("Closing isolated browser session...", "warn");
+      console.log("Closing isolated browser session...", "warn");
       await context.close();
     }
   }
